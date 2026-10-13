@@ -1,0 +1,11 @@
+# Goal
+isaacbot_amr_vda5050_msgs/Edge[] edges
+isaacbot_amr_vda5050_msgs/Node[] nodes
+---
+# Result
+std_msgs/Empty result
+---
+# Feedback
+isaacbot_amr_vda5050_msgs/AGVPosition position
+isaacbot_amr_vda5050_msgs/Velocity velocity
+isaacbot_amr_vda5050_msgs/Node last_node

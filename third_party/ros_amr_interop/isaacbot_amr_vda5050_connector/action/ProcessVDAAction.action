@@ -1,0 +1,8 @@
+# Goal
+isaacbot_amr_vda5050_msgs/Action action
+---
+# Result
+isaacbot_amr_vda5050_msgs/CurrentAction result
+---
+# Feedback
+isaacbot_amr_vda5050_msgs/CurrentAction current_action
