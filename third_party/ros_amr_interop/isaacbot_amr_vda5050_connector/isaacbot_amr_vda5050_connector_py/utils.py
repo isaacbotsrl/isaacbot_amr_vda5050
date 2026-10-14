@@ -278,6 +278,31 @@ def get_vda5050_mqtt_topic(
     return f"{interface_name}/{major_version}/{manufacturer}/{serial_number}/{topic}"
 
 
+def ros_name_token(value):
+    """
+    Return ``value`` as a valid ROS 2 name token.
+
+    isaacbot_amr_vda5050: VDA 5050 allows ``- . :`` in serial numbers and leading digits, ROS names
+    do not; a serial such as ``rover-001`` crashed mqtt_bridge and the controller at startup. MQTT
+    topics and payloads keep the raw identity; only ROS names go through here. Keep in sync with
+    ``utils::ros_name_token`` (C++, adapter side).
+
+    Args
+    ----
+        value (string): Identity field, e.g. a manufacturer or serial number.
+
+    Returns
+    -------
+        string: ``value`` with every character other than ``A-Z a-z 0-9 _`` replaced by ``_``,
+            prefixed with ``_`` when it starts with a digit; ``_`` when empty.
+
+    """
+    token = re.sub(r"[^A-Za-z0-9_]", "_", value)
+    if not token or token[0].isdigit():
+        token = "_" + token
+    return token
+
+
 def get_vda5050_ros2_topic(
     manufacturer, serial_number, topic, interface_name="uagv", major_version="v1"
 ):
@@ -310,7 +335,8 @@ def get_vda5050_ros2_topic(
 
     """
     mqtt_topic = get_vda5050_mqtt_topic(
-        manufacturer, serial_number, topic, major_version, interface_name)
+        ros_name_token(manufacturer), ros_name_token(serial_number), topic, major_version,
+        interface_name)
     return (
         f"/{mqtt_topic}"
     )

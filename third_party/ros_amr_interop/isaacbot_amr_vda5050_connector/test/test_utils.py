@@ -35,6 +35,8 @@ from isaacbot_amr_vda5050_connector_py.utils import json_camel_to_snake_case
 from isaacbot_amr_vda5050_connector_py.utils import json_snake_to_camel_case
 from isaacbot_amr_vda5050_connector_py.utils import get_vda5050_mqtt_topic
 from isaacbot_amr_vda5050_connector_py.utils import get_vda5050_ros2_topic
+from isaacbot_amr_vda5050_connector_py.utils import ros_name_token
+from rclpy.validate_topic_name import validate_topic_name
 
 
 @pytest.mark.parametrize(
@@ -153,3 +155,34 @@ def test_get_vda5050_ros2_topic(test_input, expected):
 def test_get_vda5050_ros2_topic_exceptions(test_input, expectation):
     with expectation:
         assert get_vda5050_ros2_topic(**test_input) == expectation
+
+
+# isaacbot_amr_vda5050: VDA 5050 serial numbers may hold "- . :" and leading digits; ROS names may
+# not. Same cases as test/adapter/utils/ros_name_token_test.cpp.
+@pytest.mark.parametrize(
+    "test_input, expected",
+    [
+        ("ardennes", "ardennes"),
+        ("MechatronicsAcademy", "MechatronicsAcademy"),
+        ("rover-001", "rover_001"),
+        ("a.b:c", "a_b_c"),
+        ("0001", "_0001"),
+        ("", "_"),
+    ],
+)
+def test_ros_name_token(test_input, expected):
+    assert ros_name_token(test_input) == expected
+
+
+def test_get_vda5050_ros2_topic_is_valid_ros_name_for_vda_serial():
+    topic = get_vda5050_ros2_topic(
+        manufacturer="Mechatronics-Academy", serial_number="rover-001", topic="state",
+        major_version="v2")
+    assert topic == "/uagv/v2/Mechatronics_Academy/rover_001/state"
+    validate_topic_name(topic)
+
+
+def test_get_vda5050_mqtt_topic_keeps_raw_vda_serial():
+    assert get_vda5050_mqtt_topic(
+        manufacturer="MechatronicsAcademy", serial_number="rover-001", topic="state",
+        major_version="v2") == "uagv/v2/MechatronicsAcademy/rover-001/state"

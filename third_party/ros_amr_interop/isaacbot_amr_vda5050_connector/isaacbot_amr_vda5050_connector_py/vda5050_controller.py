@@ -49,6 +49,7 @@ from isaacbot_amr_vda5050_connector_py.utils import read_double_parameter
 from isaacbot_amr_vda5050_connector_py.utils import read_int_parameter
 from isaacbot_amr_vda5050_connector_py.utils import read_str_array_parameter
 from isaacbot_amr_vda5050_connector_py.utils import read_str_parameter
+from isaacbot_amr_vda5050_connector_py.utils import ros_name_token
 
 # ROS msgs / srvs / actions
 from isaacbot_amr_vda5050_msgs.msg import Action as VDAAction
@@ -249,7 +250,8 @@ class VDA5050Controller(Node):
     def _configure_action_clients(self):
         """Configure Controller <> Adapter ROS Action interfaces."""
         base_interface_name = (
-            f"{self.get_namespace()}/{self._manufacturer_name}/{self._robot_name}/"
+            f"{self.get_namespace()}/{ros_name_token(self._manufacturer_name)}/"
+            f"{ros_name_token(self._robot_name)}/"
         )
 
         if self._enable_nav_through_nodes:
@@ -294,7 +296,8 @@ class VDA5050Controller(Node):
     def _configure_service_clients(self):
         """Configure Controller <> Adapter ROS Service interfaces."""
         base_interface_name = (
-            f"{self.get_namespace()}/{self._manufacturer_name}/{self._robot_name}/"
+            f"{self.get_namespace()}/{ros_name_token(self._manufacturer_name)}/"
+            f"{ros_name_token(self._robot_name)}/"
         )
         # Service client to request GetState from the adapter
         self._get_adapter_state_svc_cli = self.create_client(

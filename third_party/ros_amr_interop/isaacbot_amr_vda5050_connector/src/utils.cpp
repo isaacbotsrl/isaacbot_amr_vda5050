@@ -77,6 +77,20 @@ std::string to_snake_case(const std::string & camel_case_msg)
   return snake_case_msg;
 }
 
+std::string ros_name_token(const std::string & value)
+{
+  std::string token;
+  for (const char c : value) {
+    const bool ascii_alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+      (c >= '0' && c <= '9');
+    token += (ascii_alnum || c == '_') ? c : '_';
+  }
+  if (token.empty() || (token[0] >= '0' && token[0] <= '9')) {
+    token.insert(token.begin(), '_');
+  }
+  return token;
+}
+
 geometry_msgs::msg::PoseStamped get_pose_from_node(const isaacbot_amr_vda5050_msgs::msg::Node & node)
 {
   geometry_msgs::msg::PoseStamped pose_stamped;

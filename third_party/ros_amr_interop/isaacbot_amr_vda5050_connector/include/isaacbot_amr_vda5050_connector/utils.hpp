@@ -88,6 +88,18 @@ std::vector<std::string> read_str_array_parameter(
 std::string to_snake_case(const std::string & camel_case_msg);
 
 /**
+ * @brief Make an identity field (manufacturer, serial number) a valid ROS 2 name token.
+ *
+ * isaacbot_amr_vda5050: VDA 5050 allows "- . :" and leading digits in serial numbers, ROS names do
+ * not. Keep in sync with ros_name_token() in isaacbot_amr_vda5050_connector_py/utils.py: the
+ * controller (Python) and the adapter must build the same names.
+ * @param value Identity field.
+ * @return value with every character other than A-Z a-z 0-9 _ replaced by '_', prefixed with
+ *   '_' when it starts with a digit; "_" when empty.
+ */
+std::string ros_name_token(const std::string & value);
+
+/**
  * @brief Get a pose stamped msg from a VDANode msg object.
  * @param node VDA5050 node to get the pose from.
  * @return Pose stamped msg.

@@ -33,6 +33,10 @@ add_dependencies_to_test(test_plugin_load)
 ament_add_gtest(test_handler_execution handler_execution/handler_execution_test.cpp)
 add_dependencies_to_test(test_handler_execution)
 
+# TEST - ROS NAME TOKEN
+ament_add_gtest(test_ros_name_token utils/ros_name_token_test.cpp)
+add_dependencies_to_test(test_ros_name_token)
+
 install(
   TARGETS test_plugins
   EXPORT test_plugins

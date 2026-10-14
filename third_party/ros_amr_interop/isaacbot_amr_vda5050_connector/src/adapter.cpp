@@ -90,8 +90,10 @@ void AdapterNode::on_configure()
       plugin_package_, nav_through_nodes_class_plugin_);
 
   std::string base_interface_name = std::string(get_namespace()) + "/";
-  base_interface_name += manufacturer_name_ + std::string("/");
-  base_interface_name += robot_name_ + std::string("/");
+  base_interface_name +=
+    isaacbot_amr_vda5050_connector::utils::ros_name_token(manufacturer_name_) + std::string("/");
+  base_interface_name +=
+    isaacbot_amr_vda5050_connector::utils::ros_name_token(robot_name_) + std::string("/");
 
   // Services
   supported_actions_svc_srv_ = create_service<SupportedActions>(

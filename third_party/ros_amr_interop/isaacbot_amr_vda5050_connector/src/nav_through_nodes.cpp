@@ -34,11 +34,14 @@
 
 #include <rclcpp/logging.hpp>
 
+#include "isaacbot_amr_vda5050_connector/utils.hpp"
+
 void adapter::NavThroughNodes::setupExtendNavigationService()
 {
+  using isaacbot_amr_vda5050_connector::utils::ros_name_token;
   std::string manufacturer_name = node_->get_parameter("manufacturer_name").as_string();
   std::string base_interface_name = std::string(node_->get_namespace()) + "/"
-      + manufacturer_name + "/" + robot_name_ + "/";
+      + ros_name_token(manufacturer_name) + "/" + ros_name_token(robot_name_) + "/";
 
   extend_navigation_srv_ = node_->create_service<ExtendNavigation>(
       base_interface_name + "adapter/extend_navigation",
