@@ -43,7 +43,7 @@ using isaacbot_amr_vda5050_connector::utils::ros_name_token;
 TEST(RosNameTokenTest, MatchesPythonCases)
 {
   EXPECT_EQ(ros_name_token("ardennes"), "ardennes");
-  EXPECT_EQ(ros_name_token("MechatronicsAcademy"), "MechatronicsAcademy");
+  EXPECT_EQ(ros_name_token("IsaacBot"), "IsaacBot");
   EXPECT_EQ(ros_name_token("rover-001"), "rover_001");
   EXPECT_EQ(ros_name_token("a.b:c"), "a_b_c");
   EXPECT_EQ(ros_name_token("0001"), "_0001");
@@ -52,7 +52,7 @@ TEST(RosNameTokenTest, MatchesPythonCases)
 
 TEST(RosNameTokenTest, BuildsValidTopicNameFromVdaSerial)
 {
-  const std::string name = "/ardennes_001/vda5050/" + ros_name_token("Mechatronics-Academy") +
+  const std::string name = "/ardennes_001/vda5050/" + ros_name_token("Isaac-Bot") +
     "/" + ros_name_token("rover-001") + "/adapter/nav_through_nodes";
   int result = -1;
   size_t invalid_index = 0;

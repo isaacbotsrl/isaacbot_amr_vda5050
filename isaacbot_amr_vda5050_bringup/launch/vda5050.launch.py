@@ -1,4 +1,4 @@
-# Copyright 2026 Mechatronics Academy
+# Copyright 2026 IsaacBot
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -112,7 +112,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'broker_password', default_value='', description='MQTT password.'),
         DeclareLaunchArgument(
-            'manufacturer', default_value='MechatronicsAcademy',
+            'manufacturer', default_value='IsaacBot',
             description='VDA 5050 manufacturer (MQTT topic level).'),
         DeclareLaunchArgument(
             'serial_number', default_value='ardennes',

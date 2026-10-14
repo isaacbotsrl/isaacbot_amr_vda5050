@@ -163,7 +163,7 @@ def test_get_vda5050_ros2_topic_exceptions(test_input, expectation):
     "test_input, expected",
     [
         ("ardennes", "ardennes"),
-        ("MechatronicsAcademy", "MechatronicsAcademy"),
+        ("IsaacBot", "IsaacBot"),
         ("rover-001", "rover_001"),
         ("a.b:c", "a_b_c"),
         ("0001", "_0001"),
@@ -176,13 +176,13 @@ def test_ros_name_token(test_input, expected):
 
 def test_get_vda5050_ros2_topic_is_valid_ros_name_for_vda_serial():
     topic = get_vda5050_ros2_topic(
-        manufacturer="Mechatronics-Academy", serial_number="rover-001", topic="state",
+        manufacturer="Isaac-Bot", serial_number="rover-001", topic="state",
         major_version="v2")
-    assert topic == "/uagv/v2/Mechatronics_Academy/rover_001/state"
+    assert topic == "/uagv/v2/Isaac_Bot/rover_001/state"
     validate_topic_name(topic)
 
 
 def test_get_vda5050_mqtt_topic_keeps_raw_vda_serial():
     assert get_vda5050_mqtt_topic(
-        manufacturer="MechatronicsAcademy", serial_number="rover-001", topic="state",
-        major_version="v2") == "uagv/v2/MechatronicsAcademy/rover-001/state"
+        manufacturer="IsaacBot", serial_number="rover-001", topic="state",
+        major_version="v2") == "uagv/v2/IsaacBot/rover-001/state"

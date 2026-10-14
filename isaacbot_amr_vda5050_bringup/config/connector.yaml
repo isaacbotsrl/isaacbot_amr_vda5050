@@ -12,7 +12,7 @@
     # Empty username: no TLS and no authentication (the isaacbot's own broker, LAN only).
     mqtt_username: ""
     mqtt_password: ""
-    manufacturer_name: "MechatronicsAcademy"
+    manufacturer_name: "IsaacBot"
     serial_number: "ardennes"
     # Topics are <interface_name>/v2/<manufacturer_name>/<serial_number>/<topic>.
     interface_name: "uagv"
@@ -22,7 +22,7 @@
   ros__parameters:
     # robot_name names the controller <-> adapter ROS interfaces; keep it equal to the adapter's.
     robot_name: "ardennes"
-    manufacturer_name: "MechatronicsAcademy"
+    manufacturer_name: "IsaacBot"
     serial_number: "ardennes"
     protocol_version: "2.0.0"
     interface_name: "uagv"
@@ -40,7 +40,7 @@
     factsheet:
       type_specification:
         series_name: "Ardennes"
-        series_description: "Outdoor skid-steer isaacbot (Mechatronics Academy)"
+        series_description: "Outdoor skid-steer isaacbot (IsaacBot)"
         # Skid steer turns like a differential drive; VDA 5050 2.0 has no closer kinematic type.
         agv_kinematic: "DIFF"
         agv_class: "CARRIER"
@@ -63,7 +63,7 @@
 /**/adapter:
   ros__parameters:
     robot_name: "ardennes"
-    manufacturer_name: "MechatronicsAcademy"
+    manufacturer_name: "IsaacBot"
     serial_number: "ardennes"
 
     state_handler_names: ["isaacbot_amr_vda5050_adapter::plugins::IsaacbotStateHandler"]

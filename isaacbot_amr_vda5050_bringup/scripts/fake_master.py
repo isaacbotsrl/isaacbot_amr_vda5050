@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 Mechatronics Academy
+# Copyright 2026 IsaacBot
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -235,7 +235,7 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=1883)
     parser.add_argument('--interface', default='uagv')
-    parser.add_argument('--manufacturer', default='MechatronicsAcademy')
+    parser.add_argument('--manufacturer', default='IsaacBot')
     parser.add_argument('--serial', default='ardennes')
     parser.add_argument('--watch', type=float, default=5.0,
                         help='Seconds to print traffic after the command (0: until Ctrl-C).')

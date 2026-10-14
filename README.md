@@ -8,7 +8,7 @@
 # isaacbot_amr_vda5050
 
 VDA 5050 fleet interface for Ardennes: a master control sends orders over MQTT, and the isaacbot
-drives them through `isaacbot_amr_mission_manager` and Nav 2. It runs as the `rover-a1-vda5050` container
+drives them through `isaacbot_amr_mission_manager` and Nav 2. It runs as the `ardennes-vda5050` container
 of [`rover_docker`](https://github.com/RaduPotlog/rover_docker).
 
 It is built on an existing implementation rather than written from scratch: InOrbit's
