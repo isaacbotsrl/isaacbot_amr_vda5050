@@ -7,7 +7,7 @@
     Metapackage of the Ardennes VDA 5050 container: the vendored InOrbit connector and the isaacbot's
     adapter and bringup.
   </description>
-  <maintainer email="potlogradu@gmail.com">root</maintainer>
+  <maintainer email="potlogradu@gmail.com">radupotlog</maintainer>
   <license>Apache License 2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
