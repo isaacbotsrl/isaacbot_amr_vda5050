@@ -158,8 +158,8 @@ without parameters:
   turns in place poorly, and the ROS message cannot tell an omitted `theta` from `0.0`: honouring
   it would spin the isaacbot to 0 rad at every node of a master control that leaves `theta` out. Set
   `node` to use each node's `theta`.
-- **Frame:** node coordinates are taken to be in Nav 2's global frame (`isaacbot.map_frame`, the
-  container derives it from the localization source). The mission manager refuses missions in
+- **Frame:** node coordinates are taken to be in Nav 2's global frame (`isaacbot.map_frame`, always
+  `map`; the container's `ISAACBOT_AMR_VDA5050_MAP_FRAME` still overrides it). The mission manager refuses missions in
   any other frame, with a message that ends up in `missionRefused`.
 - **Refused orders** do not stop a mission the isaacbot is already running for someone else (e.g.
   an operator's GoTo). Only a mission this connector dispatched, or one whose `set_mission` timed
@@ -186,8 +186,8 @@ ros2 launch isaacbot_amr_vda5050_bringup vda5050.launch.py namespace:=isaacbot m
 Launch arguments: `namespace`, `broker_host`, `broker_port`, `broker_username`, `broker_password`,
 `manufacturer`, `serial_number`, `map_frame`, `use_sim_time`, `params_file`.
 
-`isaacbot_amr_mission_manager` must run with the same frame (`localization_source` gps/slam/amcl/indoor
-→ `map`, odom → `odom`), and the isaacbot must be in Automatic.
+`isaacbot_amr_mission_manager` must run with the same frame (both default to `map`, Nav 2's global
+frame), and the isaacbot must be in Automatic.
 
 ## Testing
 
@@ -228,7 +228,7 @@ For a real master control, NVIDIA's
 [vda5050_visualizer](https://github.com/bekirbostanci/vda5050_visualizer) watches the traffic over
 the broker's WebSockets port (9001).
 
-Verified 2026-09-28 in Gazebo (`isaacbot_amr_gazebo`, Nav 2 with `localization_source:=slam`,
+Verified 2026-09-28 in Gazebo (`isaacbot_amr_gazebo`, Nav 2 on slam_toolbox,
 `isaacbot_amr_drive_mode`, `isaacbot_amr_mission_manager`):
 - the refusal in Assisted mode (`MANUAL`, `missionRefused`);
 - a four-node order around an obstacle;

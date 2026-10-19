@@ -119,8 +119,8 @@ def generate_launch_description():
             description='VDA 5050 serialNumber (MQTT topic level): A-Z a-z 0-9 _ . : -'),
         DeclareLaunchArgument(
             'map_frame', default_value='map',
-            description="Nav 2 global frame the order coordinates are in ('odom' with "
-                        'localization_source odom); prefixed with <namespace>/.'),
+            description='Nav 2 global frame the order coordinates are in; prefixed with '
+                        '<namespace>/.'),
         DeclareLaunchArgument(
             'use_sim_time', default_value='false', description='Use /clock (Gazebo).'),
         DeclareLaunchArgument(

@@ -167,8 +167,7 @@
     isaacbot:
       namespace: "isaacbot"
       # Nav 2's global frame. Order node positions are taken to be in this frame, and
-      # isaacbot_amr_mission_manager refuses missions in any other: with localization_source odom set
-      # this to "odom".
+      # isaacbot_amr_mission_manager refuses missions in any other.
       map_frame: "map"
       base_frame: "base_link"
       # Reported as mapId when isaacbot_amr_indoor_nav_manager does not name the map in use.
