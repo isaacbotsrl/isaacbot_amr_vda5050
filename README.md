@@ -183,8 +183,8 @@ Nav 2. GPS only lines the portal's orders up with that map, and shows where the 
 **The frame comes with each trip.** The portal's `startTrip` carries `datum_lat`, `datum_lon`,
 `enu_map_id` and `parked_heading_deg`, from its Settings page. The adapter adopts them before
 mapping afresh, so the robot needs no location of its own. `isaacbot.geo.datum_lat` / `datum_lon` /
-`enu_map_id` / `parked_heading_deg` (`ISAACBOT_AMR_DELIVERY_*`) are only a fallback for a
-`startTrip` without them. Until its first trip, a robot without that fallback reports its SLAM
+`enu_map_id` / `parked_heading_deg` (launch arguments, not balena variables) are only a fallback
+for manual tests with a `startTrip` that carries none. Until its first trip, a robot without that fallback reports its SLAM
 pose and its raw `gpsFix`.
 
 **ENU orders.** An order whose `mapId` is `enu_map_id` is in metres East / North of the datum.
@@ -229,7 +229,7 @@ from the fit quality. The `information` array adds:
 | Action | Scope | What it does |
 |---|---|---|
 | `startTrip` | instant | Calls the nav manager's `start_mapping` (a fresh SLAM map), then waits until the isaacbot is mapping, has a pose and is GPS-aligned. FINISHED: the portal sends the order. FAILED after `start_trip_timeout` (60 s). |
-| `openCargo` / `closeCargo` | node, instant | Switch `isaacbot.cargo.lock_output` (aux 1..6; 0 = no lock fitted: a no-op that succeeds). |
+| `openCargo` / `closeCargo` | node, instant | Switch `isaacbot.cargo.lock_output` (aux 1..6, balena `ISAACBOT_AMR_VDA5050_CARGO_LOCK_OUTPUT`; 0 = no lock fitted: a no-op that succeeds). |
 | `confirmPickup` | node | HARD-blocking: wait at the customer for `cargo/pickup_confirmed` (`std_msgs/Bool` true), e.g. from a lid switch, a PIN keypad or an operator. FAILED after `pickup_timeout` (600 s) or on cancel. |
 
 Nav 2 runs with `ISAACBOT_AMR_ORCH_NAV_PROFILE=delivery` for this (isaacbot_amr_navigation). The
