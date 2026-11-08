@@ -99,6 +99,11 @@ public:
                 return;
             }
             if (std::chrono::steady_clock::now() >= deadline_) {
+                const auto gps = link_->gpsProblem();
+                if (!gps.empty()) {
+                    fail(gps);
+                    return;
+                }
                 fail(link_->mappingSessions() > sessions_before_ ?
                     "No GPS alignment in time: no fix, or no heading (set "
                     "isaacbot.geo.parked_heading_deg)." :

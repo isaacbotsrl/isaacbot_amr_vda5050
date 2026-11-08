@@ -93,6 +93,8 @@ struct IsaacbotLinkConfig
     /// startTrip: isaacbot_amr_indoor_nav_manager's start_mapping (std_srvs/Trigger).
     std::string start_mapping_service;
     double start_trip_timeout{60.0};
+    /// With a datum set, no GPS fix for this long is reported (log + VDA 5050 warning).
+    double no_fix_warning_s{30.0};
 
     application::CargoConfig cargo;
     std::string pickup_topic;
@@ -122,6 +124,8 @@ struct IsaacbotSnapshot
     std::optional<domain::GpsFix> gps_fix;
     std::optional<domain::AlignmentQuality> alignment;
     bool report_enu{false};
+    /// Delivery is set up but no GPS fix arrives: why deliveries cannot start. Empty: fine.
+    std::string gps_problem;
     Velocity2D velocity;
     domain::BatteryReading battery;
     domain::IsaacbotHealth health;
@@ -176,6 +180,8 @@ public:
     std::uint64_t mappingSessions() const { return mapping_sessions_.load(); }
     /// Mapping, the pose is known and GPS aligned it: ENU orders can be driven.
     bool readyForEnuOrders() const;
+    /// Why no GPS fix arrives (empty: fixes arrive, or no datum). Non-blocking.
+    std::string gpsProblem() const;
     const IsaacbotLinkConfig & config() const { return config_; }
 
     /** @brief Current state. Non-blocking; safe on the executor thread. */
@@ -218,6 +224,8 @@ private:
     /// the old map frame, and one such pair would seed the new alignment wrongly.
     rclcpp::Time fixes_from_;
     rclcpp::Time fix_received_;
+    rclcpp::Time started_;
+    rclcpp::TimerBase::SharedPtr gps_watchdog_;
     rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr start_mapping_client_;
 
     rclcpp::Subscription<isaacbot_amr_msgs::msg::MissionState>::SharedPtr mission_state_sub_;

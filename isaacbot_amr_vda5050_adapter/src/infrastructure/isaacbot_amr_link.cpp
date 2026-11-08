@@ -275,6 +275,7 @@ IsaacbotLinkConfig IsaacbotLinkConfig::fromParameters(rclcpp::Node & node)
     config.gps_course_topic = name("isaacbot.geo.gps_course_topic", "gps/heading_imu");
     config.start_mapping_service = name("isaacbot.geo.start_mapping_service", "start_mapping");
     config.start_trip_timeout = node.declare_parameter<double>("isaacbot.geo.start_trip_timeout", 60.0);
+    config.no_fix_warning_s = node.declare_parameter<double>("isaacbot.geo.no_fix_warning_s", 30.0);
     // Compass bearing (0 = North, clockwise) the isaacbot faces when parked at the shop.
     const double parked_bearing_deg =
         node.declare_parameter<double>("isaacbot.geo.parked_heading_deg", nan);
@@ -372,7 +373,8 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
   motion_lock_received_(0, 0, node.get_clock()->get_clock_type()),
   odom_received_(0, 0, node.get_clock()->get_clock_type()),
   fixes_from_(0, 0, node.get_clock()->get_clock_type()),
-  fix_received_(0, 0, node.get_clock()->get_clock_type())
+  fix_received_(0, 0, node.get_clock()->get_clock_type()),
+  started_(node.now())
 {
     using std::placeholders::_1;
 
@@ -505,6 +507,15 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
         RCLCPP_INFO(
             node_.get_logger(), "Delivery ENU frame '%s' at %.7f, %.7f (GPS for alignment only).",
             config_.enu_map_id.c_str(), config_.datum->lat, config_.datum->lon);
+
+        // Without fixes no delivery can start (startTrip would only time out): say why, early.
+        gps_watchdog_ = node_.create_wall_timer(
+            std::chrono::duration<double>(std::max(1.0, config_.no_fix_warning_s)), [this]() {
+                const auto problem = gpsProblem();
+                if (!problem.empty()) {
+                    RCLCPP_WARN(node_.get_logger(), "%s", problem.c_str());
+                }
+            });
     }
 
     start_mapping_client_ =
@@ -541,6 +552,7 @@ IsaacbotSnapshot IsaacbotLink::snapshot() const
         }
     }
     const double geo_score = geo_ ? geo_->score() : 0.0;
+    snapshot.gps_problem = gpsProblem();
 
     // Taken only after the use cases' own locks are released: they never nest.
     std::lock_guard<std::mutex> lock(mutex_);
@@ -656,6 +668,35 @@ application::CommandResult IsaacbotLink::startMapping()
 
     const auto response = future.get();
     return {response->success, response->message, false};
+}
+
+std::string IsaacbotLink::gpsProblem() const
+{
+    if (!geo_) {
+        return {};
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto now = node_.now();
+
+    if (fix_received_.nanoseconds() == 0) {
+        if ((now - started_).seconds() < config_.no_fix_warning_s) {
+            return {};
+        }
+        return "Delivery is set up (datum " + std::to_string(config_.datum->lat) + ", " +
+               std::to_string(config_.datum->lon) + ") but no GPS fix has arrived on '" +
+               config_.gps_fix_topic +
+               "': is ISAACBOT_AMR_SYSTEM_USE_GPS=true (it starts the GNSS driver) and does the "
+               "receiver have a fix? Without one no delivery trip can start.";
+    }
+
+    if ((now - fix_received_).seconds() >= config_.no_fix_warning_s) {
+        return "No GPS fix for " + std::to_string(static_cast<int>((now - fix_received_).seconds())) +
+               " s on '" + config_.gps_fix_topic + "' (lost fix or GNSS driver stopped): new "
+               "delivery trips cannot start; a running one keeps its last alignment.";
+    }
+
+    return {};
 }
 
 bool IsaacbotLink::readyForEnuOrders() const

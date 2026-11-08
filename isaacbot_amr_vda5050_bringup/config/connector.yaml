@@ -271,6 +271,9 @@
         # startTrip: the nav manager service it calls, and how long it waits for the alignment.
         start_mapping_service: "start_mapping"
         start_trip_timeout: 60.0
+        # With a datum set, no GPS fix for this long: logged, and a gpsNoFix WARNING in the state
+        # (usually ISAACBOT_AMR_SYSTEM_USE_GPS=false: the GNSS driver is not running).
+        no_fix_warning_s: 30.0
       cargo:
         lock_output: 0        # aux output 1..6 of the cargo lock; 0 = none fitted
         unlock_level: true    # the output level that unlocks

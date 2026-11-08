@@ -200,6 +200,13 @@ The adapter:
 - **Reset:** the alignment restarts on every new SLAM session, when localization goes
   SWITCHING → MAPPING or the map name changes.
 
+**No GPS.** With a datum set, the adapter checks for GPS fixes. If none arrives for
+`no_fix_warning_s` (30 s, since start or since the last fix), it logs a warning and adds a
+`gpsNoFix` WARNING error to the state, which the portal shows. A `startTrip` that times out
+reports the same reason. The usual cause is `ISAACBOT_AMR_SYSTEM_USE_GPS=false`: that setting
+also stops the GNSS driver. Delivery robots need it `true`. It does not make GPS a navigation
+source: the global EKF runs with `publish_global_tf=false`.
+
 **Drift.** The live SLAM map drifts against GPS. While an ENU order runs, the nodes still ahead are
 re-sent once one of them would move ≥ 1 m or the yaw changes ≥ 3° (`realign_min_*`). The
 re-projection keeps node ids, so progress reporting is unchanged.

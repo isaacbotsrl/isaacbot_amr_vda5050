@@ -60,6 +60,12 @@ public:
             current_state_->add_error(infrastructure::toError(error));
         }
 
+        // Delivery set up but no GPS: a WARNING the fleet (the delivery portal) shows.
+        if (!snapshot.gps_problem.empty()) {
+            current_state_->add_error(infrastructure::toError(
+                domain::IsaacbotError{"gpsNoFix", snapshot.gps_problem, false}));
+        }
+
         for (const auto & info : infrastructure::toInformation(snapshot)) {
             current_state_->add_information(info);
         }
