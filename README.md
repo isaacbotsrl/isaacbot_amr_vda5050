@@ -210,6 +210,11 @@ reports the same reason. The usual cause is `ISAACBOT_AMR_SYSTEM_USE_GPS=false`:
 also stops the GNSS driver. Delivery robots need it `true`. It does not make GPS a navigation
 source: the global EKF runs with `publish_global_tf=false`.
 
+**Nav 2 profile.** A delivery isaacbot needs `ISAACBOT_AMR_ORCH_NAV_PROFILE=delivery`. The adapter
+reads Nav 2's `global_costmap` `rolling_window` every `no_fix_warning_s`. While the isaacbot knows a
+delivery frame but Nav 2 runs the indoor profile, it reports a `navProfileIndoor` WARNING, which the
+portal shows.
+
 **Drift.** The live SLAM map drifts against GPS. While an ENU order runs, the nodes still ahead are
 re-sent once one of them would move ≥ 1 m or the yaw changes ≥ 3° (`realign_min_*`). The
 re-projection keeps node ids, so progress reporting is unchanged.

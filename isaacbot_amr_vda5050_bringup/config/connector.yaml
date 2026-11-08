@@ -274,6 +274,10 @@
         # With a datum set, no GPS fix for this long: logged, and a gpsNoFix WARNING in the state
         # (usually ISAACBOT_AMR_SYSTEM_USE_GPS=false: the GNSS driver is not running).
         no_fix_warning_s: 30.0
+        # Nav 2's global costmap: its rolling_window (true = ISAACBOT_AMR_ORCH_NAV_PROFILE=delivery)
+        # is checked every no_fix_warning_s; a delivery isaacbot on the indoor profile gets a
+        # navProfileIndoor WARNING.
+        global_costmap_node: "global_costmap/global_costmap"
       cargo:
         lock_output: 0        # aux output 1..6 of the cargo lock; 0 = none fitted
         unlock_level: true    # the output level that unlocks

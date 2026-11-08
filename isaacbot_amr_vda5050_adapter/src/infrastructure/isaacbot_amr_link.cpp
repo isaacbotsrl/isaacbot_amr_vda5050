@@ -276,6 +276,8 @@ IsaacbotLinkConfig IsaacbotLinkConfig::fromParameters(rclcpp::Node & node)
     config.start_mapping_service = name("isaacbot.geo.start_mapping_service", "start_mapping");
     config.start_trip_timeout = node.declare_parameter<double>("isaacbot.geo.start_trip_timeout", 60.0);
     config.no_fix_warning_s = node.declare_parameter<double>("isaacbot.geo.no_fix_warning_s", 30.0);
+    config.global_costmap_node =
+        name("isaacbot.geo.global_costmap_node", "global_costmap/global_costmap");
     // Compass bearing (0 = North, clockwise) the isaacbot faces when parked at the shop.
     const double parked_bearing_deg =
         node.declare_parameter<double>("isaacbot.geo.parked_heading_deg", nan);
@@ -514,12 +516,18 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
                 "only).", config_.enu_map_id.c_str(), config_.datum->lat, config_.datum->lon);
         }
 
-        // Without fixes no delivery can start (startTrip would only time out): say why, early.
+        costmap_params_ =
+            std::make_shared<rclcpp::AsyncParametersClient>(&node_, config_.global_costmap_node);
+
+        // Without fixes no delivery can start (startTrip would only time out), and on the
+        // indoor Nav 2 profile long trips choke the global costmap: say so, early and often.
         gps_watchdog_ = node_.create_wall_timer(
             std::chrono::duration<double>(std::max(1.0, config_.no_fix_warning_s)), [this]() {
-                const auto problem = gpsProblem();
-                if (!problem.empty()) {
-                    RCLCPP_WARN(node_.get_logger(), "%s", problem.c_str());
+                checkNavProfile();
+                for (const auto & problem : {gpsProblem(), navProfileProblem()}) {
+                    if (!problem.empty()) {
+                        RCLCPP_WARN(node_.get_logger(), "%s", problem.c_str());
+                    }
                 }
             });
     }
@@ -559,6 +567,7 @@ IsaacbotSnapshot IsaacbotLink::snapshot() const
     }
     const double geo_score = geo_ ? geo_->score() : 0.0;
     snapshot.gps_problem = gpsProblem();
+    snapshot.nav_profile_problem = navProfileProblem();
 
     // Taken only after the use cases' own locks are released: they never nest.
     std::lock_guard<std::mutex> lock(mutex_);
@@ -705,6 +714,39 @@ std::string IsaacbotLink::gpsProblem() const
     }
 
     return {};
+}
+
+void IsaacbotLink::checkNavProfile()
+{
+    // Executor thread: asynchronous, the answer lands in global_rolling_ later.
+    if (!costmap_params_ || !costmap_params_->service_is_ready()) {
+        return;
+    }
+    costmap_params_->get_parameters(
+        {"rolling_window"},
+        [this](std::shared_future<std::vector<rclcpp::Parameter>> future) {
+            try {
+                const auto params = future.get();
+                if (!params.empty() && params[0].get_type() == rclcpp::ParameterType::PARAMETER_BOOL) {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    global_rolling_ = params[0].as_bool();
+                }
+            } catch (const std::exception &) {
+                // Nav 2 restarting: ask again next time.
+            }
+        });
+}
+
+std::string IsaacbotLink::navProfileProblem() const
+{
+    const bool delivery = geo_ && geo_->datum().has_value();
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!delivery || !global_rolling_ || *global_rolling_) {
+        return {};
+    }
+    return "This isaacbot takes delivery trips, but Nav 2 runs the indoor profile: its global "
+           "costmap grows with the live map and long trips will slow it down or stall it. Set "
+           "ISAACBOT_AMR_ORCH_NAV_PROFILE=delivery on this device.";
 }
 
 bool IsaacbotLink::readyForEnuOrders() const

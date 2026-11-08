@@ -66,6 +66,11 @@ public:
                 domain::IsaacbotError{"gpsNoFix", snapshot.gps_problem, false}));
         }
 
+        if (!snapshot.nav_profile_problem.empty()) {
+            current_state_->add_error(infrastructure::toError(
+                domain::IsaacbotError{"navProfileIndoor", snapshot.nav_profile_problem, false}));
+        }
+
         for (const auto & info : infrastructure::toInformation(snapshot)) {
             current_state_->add_information(info);
         }

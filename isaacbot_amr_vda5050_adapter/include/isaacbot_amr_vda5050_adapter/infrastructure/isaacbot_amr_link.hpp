@@ -95,6 +95,8 @@ struct IsaacbotLinkConfig
     double start_trip_timeout{60.0};
     /// With a datum set, no GPS fix for this long is reported (log + VDA 5050 warning).
     double no_fix_warning_s{30.0};
+    /// Nav 2's global costmap node: its rolling_window tells the profile (delivery = rolling).
+    std::string global_costmap_node;
 
     application::CargoConfig cargo;
     std::string pickup_topic;
@@ -126,6 +128,8 @@ struct IsaacbotSnapshot
     bool report_enu{false};
     /// Delivery is set up but no GPS fix arrives: why deliveries cannot start. Empty: fine.
     std::string gps_problem;
+    /// Delivery is set up but Nav 2 runs the indoor profile. Empty: fine or unknown.
+    std::string nav_profile_problem;
     Velocity2D velocity;
     domain::BatteryReading battery;
     domain::IsaacbotHealth health;
@@ -186,6 +190,8 @@ public:
     bool readyForEnuOrders() const;
     /// Why no GPS fix arrives (empty: fixes arrive, or no datum). Non-blocking.
     std::string gpsProblem() const;
+    /// Why Nav 2's profile does not suit deliveries (empty: it does, unknown, or no datum).
+    std::string navProfileProblem() const;
     const IsaacbotLinkConfig & config() const { return config_; }
 
     /** @brief Current state. Non-blocking; safe on the executor thread. */
@@ -230,6 +236,9 @@ private:
     rclcpp::Time fix_received_;
     rclcpp::Time started_;
     rclcpp::TimerBase::SharedPtr gps_watchdog_;
+    void checkNavProfile();
+    std::shared_ptr<rclcpp::AsyncParametersClient> costmap_params_;
+    std::optional<bool> global_rolling_;   ///< Nav 2's global costmap rolls (delivery profile)
     rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr start_mapping_client_;
 
     rclcpp::Subscription<isaacbot_amr_msgs::msg::MissionState>::SharedPtr mission_state_sub_;
