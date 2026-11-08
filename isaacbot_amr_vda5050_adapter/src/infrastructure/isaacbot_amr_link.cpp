@@ -386,10 +386,13 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
         std::chrono::duration<double>(config_.service_availability_timeout),
         std::chrono::duration<double>(config_.service_response_timeout));
 
+    // The ENU frame normally arrives with each startTrip from the delivery portal; a datum in
+    // the parameters only gives it a value before the first trip.
+    std::optional<domain::EnuDatum> datum;
     if (config_.datum) {
-        geo_ = std::make_shared<application::GeoAlignmentUseCase>(
-            domain::EnuDatum(*config_.datum, config_.enu_map_id), config_.geo);
+        datum.emplace(*config_.datum, config_.enu_map_id);
     }
+    geo_ = std::make_shared<application::GeoAlignmentUseCase>(datum, config_.geo);
 
     navigation_ = std::make_unique<application::NavigationUseCase>(
         missions, pose_source_, config_.mission_prefix, config_.orientation_mode, geo_,
@@ -490,7 +493,7 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
             odom_received_ = node_.now();
         });
 
-    if (geo_) {
+    {
         // Reliable, as the GPS driver publishes (rules/ros2_communication.md: GNSS exception).
         fix_sub_ = node_.create_subscription<sensor_msgs::msg::NavSatFix>(
             config_.gps_fix_topic, rclcpp::QoS(rclcpp::KeepLast(10)).reliable(),
@@ -504,9 +507,12 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
                 }
             });
 
-        RCLCPP_INFO(
-            node_.get_logger(), "Delivery ENU frame '%s' at %.7f, %.7f (GPS for alignment only).",
-            config_.enu_map_id.c_str(), config_.datum->lat, config_.datum->lon);
+        if (config_.datum) {
+            RCLCPP_INFO(
+                node_.get_logger(),
+                "Delivery ENU frame '%s' at %.7f, %.7f until a trip sets one (GPS for alignment "
+                "only).", config_.enu_map_id.c_str(), config_.datum->lat, config_.datum->lon);
+        }
 
         // Without fixes no delivery can start (startTrip would only time out): say why, early.
         gps_watchdog_ = node_.create_wall_timer(
@@ -543,7 +549,7 @@ IsaacbotSnapshot IsaacbotLink::snapshot() const
     snapshot.health.mission_refusal = navigation_->lastRefusal();
 
     if (geo_) {
-        snapshot.enu_map_id = config_.enu_map_id;
+        snapshot.enu_map_id = geo_->mapId();
         snapshot.report_enu = config_.report_enu;
         snapshot.gps_fix = geo_->latestFix();
         snapshot.alignment = geo_->quality();
@@ -672,7 +678,9 @@ application::CommandResult IsaacbotLink::startMapping()
 
 std::string IsaacbotLink::gpsProblem() const
 {
-    if (!geo_) {
+    // Only a delivery isaacbot (it knows a datum, from a trip or its parameters) needs GPS.
+    const auto datum = geo_ ? geo_->datum() : std::nullopt;
+    if (!datum) {
         return {};
     }
 
@@ -683,8 +691,8 @@ std::string IsaacbotLink::gpsProblem() const
         if ((now - started_).seconds() < config_.no_fix_warning_s) {
             return {};
         }
-        return "Delivery is set up (datum " + std::to_string(config_.datum->lat) + ", " +
-               std::to_string(config_.datum->lon) + ") but no GPS fix has arrived on '" +
+        return "Delivery is set up (datum " + std::to_string(datum->origin().lat) + ", " +
+               std::to_string(datum->origin().lon) + ") but no GPS fix has arrived on '" +
                config_.gps_fix_topic +
                "': is ISAACBOT_AMR_SYSTEM_USE_GPS=true (it starts the GNSS driver) and does the "
                "receiver have a fix? Without one no delivery trip can start.";
@@ -713,8 +721,20 @@ domain::RouteFrame IsaacbotLink::frameOf(const std::string & map_id) const
 {
     // Recognised even without a datum: such an order is then refused, never driven as raw
     // SLAM-map metres.
-    return !map_id.empty() && map_id == config_.enu_map_id ?
+    const auto trip_map_id = geo_ ? geo_->mapId() : std::string();
+    return !map_id.empty() && (map_id == trip_map_id || map_id == config_.enu_map_id) ?
         domain::RouteFrame::kEnu : domain::RouteFrame::kNavigation;
+}
+
+void IsaacbotLink::configureDelivery(
+    const domain::EnuDatum & datum, std::optional<double> parked_heading_enu)
+{
+    geo_->configure(datum, parked_heading_enu);
+    RCLCPP_INFO(
+        node_.get_logger(), "Delivery ENU frame '%s' at %.7f, %.7f, parked heading %s (from the trip).",
+        datum.mapId().c_str(), datum.origin().lat, datum.origin().lon,
+        parked_heading_enu ? (std::to_string(90.0 - *parked_heading_enu / kDegToRad) + " deg").c_str()
+                           : "unknown");
 }
 
 bool IsaacbotLink::fresh(const rclcpp::Time & received) const

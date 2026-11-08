@@ -169,8 +169,12 @@ public:
     application::DriveModeUseCase & driveMode() { return *drive_mode_use_case_; }
     application::FollowMeUseCase & followMe() { return *follow_me_use_case_; }
     application::CargoUseCase & cargo() { return *cargo_; }
-    /// The ENU frame and GPS alignment; nullptr when no datum is configured.
+    /// The ENU frame (none until a trip or the parameters give one) and the GPS alignment.
     application::GeoAlignmentUseCase * geo() { return geo_.get(); }
+    /// The ENU frame and parked heading for the coming trip (startTrip parameters).
+    void configureDelivery(const domain::EnuDatum & datum, std::optional<double> parked_heading_enu);
+    /// The parameters' parked heading (ENU yaw), the fallback when a trip names none.
+    std::optional<double> defaultParkedHeading() const { return config_.geo.parked_heading_enu; }
     /// The frame an order's node positions are in, from their mapId.
     domain::RouteFrame frameOf(const std::string & map_id) const;
 

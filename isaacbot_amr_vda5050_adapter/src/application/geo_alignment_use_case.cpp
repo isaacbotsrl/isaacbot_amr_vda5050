@@ -22,9 +22,36 @@
 namespace isaacbot_amr_vda5050_adapter::application
 {
 
-GeoAlignmentUseCase::GeoAlignmentUseCase(domain::EnuDatum datum, GeoAlignmentConfig config)
+GeoAlignmentUseCase::GeoAlignmentUseCase(
+    std::optional<domain::EnuDatum> datum, GeoAlignmentConfig config)
 : datum_(std::move(datum)), config_(config), aligner_(config.aligner)
 {
+}
+
+void GeoAlignmentUseCase::configure(
+    domain::EnuDatum datum, std::optional<double> parked_heading_enu)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    const bool same = datum_ && datum_->mapId() == datum.mapId() &&
+        datum_->origin().lat == datum.origin().lat && datum_->origin().lon == datum.origin().lon &&
+        config_.parked_heading_enu == parked_heading_enu;
+    datum_ = std::move(datum);
+    config_.parked_heading_enu = parked_heading_enu;
+    if (!same) {
+        resetLocked();
+    }
+}
+
+std::optional<domain::EnuDatum> GeoAlignmentUseCase::datum() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return datum_;
+}
+
+std::string GeoAlignmentUseCase::mapId() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return datum_ ? datum_->mapId() : std::string();
 }
 
 void GeoAlignmentUseCase::onFix(
@@ -37,11 +64,11 @@ void GeoAlignmentUseCase::onFix(
     std::lock_guard<std::mutex> lock(mutex_);
     latest_fix_ = fix;
 
-    if (!map_pose) {
+    if (!map_pose || !datum_) {
         return;
     }
 
-    const auto enu = datum_.toEnu(fix.point);
+    const auto enu = datum_->toEnu(fix.point);
     const double sigma = fix.sigma_m > 0.0 ? fix.sigma_m : config_.default_sigma_m;
 
     // The first fix of a SLAM session: a trip that starts parked at the shop knows its heading.
@@ -62,13 +89,15 @@ void GeoAlignmentUseCase::onCourse(double heading_enu, const domain::Pose2D & ma
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (seeded_by_course_ || aligner_.quality().yaw_from_fit || !std::isfinite(heading_enu)) {
+    if (!datum_ || seeded_by_course_ || aligner_.quality().yaw_from_fit ||
+        !std::isfinite(heading_enu))
+    {
         return;
     }
 
     std::optional<domain::EnuPoint> position;
     if (latest_fix_) {
-        position = datum_.toEnu(latest_fix_->point);
+        position = datum_->toEnu(latest_fix_->point);
     }
 
     aligner_.seed(map_pose, heading_enu, position);
@@ -79,6 +108,11 @@ void GeoAlignmentUseCase::onCourse(double heading_enu, const domain::Pose2D & ma
 void GeoAlignmentUseCase::reset()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    resetLocked();
+}
+
+void GeoAlignmentUseCase::resetLocked()
+{
     aligner_.reset();
     latest_fix_.reset();
     seeded_ = false;

@@ -50,7 +50,15 @@ struct GeoAlignmentConfig
 class GeoAlignmentUseCase : public FrameTransformPort
 {
 public:
-    GeoAlignmentUseCase(domain::EnuDatum datum, GeoAlignmentConfig config);
+    /// @param datum The ENU frame; none until a trip sets it (startTrip from the delivery portal).
+    GeoAlignmentUseCase(std::optional<domain::EnuDatum> datum, GeoAlignmentConfig config);
+
+    /**
+     * @brief Use this ENU frame (and parked heading, if given) from now on: the portal sends them
+     *        with every startTrip, so it and the isaacbot can never disagree. Resets the alignment
+     *        when anything changed.
+     */
+    void configure(domain::EnuDatum datum, std::optional<double> parked_heading_enu);
 
     /** @brief A GNSS fix, with the isaacbot's navigation-frame pose at the time (if known). */
     void onFix(const domain::GpsFix & fix, const std::optional<domain::Pose2D> & map_pose);
@@ -72,16 +80,19 @@ public:
 
     std::optional<domain::GpsFix> latestFix() const;
     domain::AlignmentQuality quality() const;
-    const domain::EnuDatum & datum() const { return datum_; }
+    std::optional<domain::EnuDatum> datum() const;
+    /// The ENU frame's VDA 5050 mapId; empty while there is no datum.
+    std::string mapId() const;
 
     /** @brief 0..1 for VDA 5050 localizationScore: 1 = tight fit, 0 = no alignment. */
     double score() const;
 
 private:
-    domain::EnuDatum datum_;
-    GeoAlignmentConfig config_;
+    void resetLocked();
 
     mutable std::mutex mutex_;
+    std::optional<domain::EnuDatum> datum_;
+    GeoAlignmentConfig config_;
     domain::FrameAligner aligner_;
     std::optional<domain::GpsFix> latest_fix_;
     bool seeded_{false};

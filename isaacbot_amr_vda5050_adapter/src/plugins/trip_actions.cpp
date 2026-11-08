@@ -15,6 +15,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <map>
+#include <optional>
+#include <stdexcept>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -30,6 +34,12 @@ namespace isaacbot_amr_vda5050_adapter::plugins
 
 /**
  * @brief startTrip: begin a delivery trip on a fresh live SLAM map, aligned to GPS.
+ *
+ * Parameters (from the delivery portal's settings, so the two never disagree):
+ *   datum_lat, datum_lon  the pizzeria: origin of the shared ENU frame (both, or neither)
+ *   enu_map_id            the ENU frame's mapId (the portal's orders use it)
+ *   parked_heading_deg    compass bearing the isaacbot faces parked at the shop (optional)
+ * Without them, the frame from the parameters (isaacbot.geo.*) is used, if any.
  *
  * The isaacbot navigates by lidar only and maps each trip afresh (no pre-built maps). This asks
  * isaacbot_amr_indoor_nav_manager for a new SLAM session, then waits until the isaacbot is mapping,
@@ -58,12 +68,14 @@ public:
             fail("Cancelled.");
             return;
         }
-        if (link_->geo() == nullptr) {
-            fail("No delivery ENU frame on this isaacbot (isaacbot.geo.datum_lat/lon unset).");
-            return;
-        }
         if (link_->navigation().routeActive()) {
             fail("An order is still running; cancel it first.");
+            return;
+        }
+        // Only now: a new frame resets the alignment, which a running route still needs.
+        std::string why;
+        if (!applyFrame(why)) {
+            fail(why);
             return;
         }
 
@@ -125,6 +137,58 @@ public:
 
 private:
     static constexpr std::chrono::milliseconds kPollPeriod{200};
+
+    /// The trip's ENU frame from the action parameters; false (and why) when there is none.
+    bool applyFrame(std::string & why)
+    {
+        std::map<std::string, std::string> params;
+        for (const auto & p : action_msg_.action_parameters) {
+            params[p.key] = p.value;
+        }
+        const auto number = [&](const std::string & key) -> std::optional<double> {
+            const auto it = params.find(key);
+            if (it == params.end() || it->second.empty()) {
+                return std::nullopt;
+            }
+            const double value = std::stod(it->second);   // throws on garbage: caught below
+            if (!std::isfinite(value)) {
+                throw std::invalid_argument(key);
+            }
+            return value;
+        };
+
+        try {
+            const auto lat = number("datum_lat");
+            const auto lon = number("datum_lon");
+            const auto bearing = number("parked_heading_deg");
+            if (lat.has_value() != lon.has_value()) {
+                why = "startTrip needs both datum_lat and datum_lon, or neither.";
+                return false;
+            }
+            if (!lat) {
+                if (!link_->geo()->datum()) {
+                    why = "No delivery ENU frame: startTrip carries none (datum_lat / datum_lon) "
+                          "and isaacbot.geo.datum_lat/lon are unset.";
+                    return false;
+                }
+                return true;   // the parameters' frame
+            }
+            std::string map_id = params.count("enu_map_id") ? params["enu_map_id"] : "";
+            if (map_id.empty()) {
+                map_id = link_->geo()->mapId().empty() ? link_->config().enu_map_id :
+                                                        link_->geo()->mapId();
+            }
+            const auto heading = bearing ?
+                std::optional<double>((90.0 - *bearing) * M_PI / 180.0) :
+                link_->defaultParkedHeading();
+            link_->configureDelivery(
+                domain::EnuDatum(domain::GeoPoint{*lat, *lon}, map_id), heading);
+            return true;
+        } catch (const std::exception & e) {
+            why = std::string("Bad startTrip parameter: ") + e.what();
+            return false;
+        }
+    }
 
     void fail(const std::string & why)
     {

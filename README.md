@@ -180,9 +180,12 @@ These are the orders of the [delivery portal](https://github.com/isaacbotsrl/isa
 The isaacbot **navigates by lidar only**: each trip is a fresh live SLAM map, and GPS never feeds
 Nav 2. GPS only lines the portal's orders up with that map, and shows where the isaacbot is.
 
-**Turning it on.** Set `isaacbot.geo.datum_lat` / `datum_lon` (the pizzeria) and `enu_map_id`. Each
-must match the portal's `DATUM_LAT` / `DATUM_LON` / `ENU_MAP_ID`. In the container these come from
-`ISAACBOT_AMR_DELIVERY_*`.
+**The frame comes with each trip.** The portal's `startTrip` carries `datum_lat`, `datum_lon`,
+`enu_map_id` and `parked_heading_deg`, from its Settings page. The adapter adopts them before
+mapping afresh, so the robot needs no location of its own. `isaacbot.geo.datum_lat` / `datum_lon` /
+`enu_map_id` / `parked_heading_deg` (`ISAACBOT_AMR_DELIVERY_*`) are only a fallback for a
+`startTrip` without them. Until its first trip, a robot without that fallback reports its SLAM
+pose and its raw `gpsFix`.
 
 **ENU orders.** An order whose `mapId` is `enu_map_id` is in metres East / North of the datum.
 The adapter:

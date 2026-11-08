@@ -115,3 +115,31 @@ TEST(GeoAlignmentUseCase, ResetForgetsTheLastFix)
     geo.reset();
     EXPECT_FALSE(geo.latestFix());
 }
+
+TEST(GeoAlignmentUseCase, NoDatumUntilATripConfiguresOne)
+{
+    GeoAlignmentUseCase geo(std::nullopt, GeoAlignmentConfig{});
+    geo.onFix(fixAt(0.0, 0.0), Pose2D{0, 0, 0});
+    EXPECT_TRUE(geo.latestFix());          // shown, never aligned without a frame
+    EXPECT_FALSE(geo.enuToNavigation());
+    EXPECT_EQ(geo.mapId(), "");
+
+    geo.configure(kDatum, M_PI_2);
+    EXPECT_EQ(geo.mapId(), "enu_test");
+    geo.reset();                           // the trip's new SLAM session
+    geo.onFix(fixAt(0.0, 0.0), Pose2D{0, 0, 0});
+    EXPECT_TRUE(geo.enuToNavigation());
+}
+
+TEST(GeoAlignmentUseCase, ConfiguringAnotherFrameResetsTheAlignment)
+{
+    GeoAlignmentUseCase geo(kDatum, parkedFacingNorth());
+    geo.onFix(fixAt(0.0, 0.0), Pose2D{0, 0, 0});
+    ASSERT_TRUE(geo.enuToNavigation());
+
+    geo.configure(kDatum, M_PI_2);         // the same frame and heading: kept
+    EXPECT_TRUE(geo.enuToNavigation());
+
+    geo.configure(EnuDatum(GeoPoint{44.43, 26.11}, "enu_test"), M_PI_2);
+    EXPECT_FALSE(geo.enuToNavigation());
+}
