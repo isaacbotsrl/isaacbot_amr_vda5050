@@ -239,3 +239,78 @@ TEST(RouteTracker, ResumeWithoutARouteDispatchesNothing)
     EXPECT_FALSE(tracker.resume(std::nullopt));
     EXPECT_FALSE(tracker.paused());
 }
+
+// --- routes in another frame (delivery orders in the shared ENU frame) ---------------------------
+
+using isaacbot_amr_vda5050_adapter::domain::Transform2D;
+
+TEST(RouteTracker, TransformsEnuNodesIntoTheNavigationFrame)
+{
+    RouteTracker tracker("vda", OrientationMode::kPath);
+    // ENU -> map: rotate +90 degrees, then shift 10 m along map x.
+    const Transform2D to_map{10.0, 0.0, M_PI_2};
+
+    const auto dispatch = tracker.start(line(2, 2), Pose2D{10.0, 0.0, 0.0}, to_map);
+
+    ASSERT_TRUE(dispatch);
+    // ENU (1, 0) -> map (10, 1); ENU (2, 0) -> map (10, 2): the route runs along map +y.
+    EXPECT_NEAR(dispatch->waypoints[0].x, 10.0, 1e-9);
+    EXPECT_NEAR(dispatch->waypoints[0].y, 1.0, 1e-9);
+    EXPECT_NEAR(dispatch->waypoints[1].y, 2.0, 1e-9);
+    EXPECT_NEAR(dispatch->waypoints[1].theta, M_PI_2, 1e-9);
+    ASSERT_TRUE(tracker.transform());
+}
+
+TEST(RouteTracker, RealignReprojectsOnlyTheNodesAheadAndOnlyPastTheThreshold)
+{
+    RouteTracker tracker("vda", OrientationMode::kNode);
+    tracker.start(line(2, 3), std::nullopt, Transform2D{});
+    tracker.onProgress(progress("vda-1", MissionPhase::kRunning, 1, 3));   // passed n2
+
+    // 0.5 m: below the 1 m threshold, nothing is sent.
+    EXPECT_FALSE(tracker.realign(Transform2D{0.5, 0.0, 0.0}, std::nullopt, 1.0, 0.05));
+
+    const auto dispatch = tracker.realign(Transform2D{2.0, 0.0, 0.0}, std::nullopt, 1.0, 0.05);
+    ASSERT_TRUE(dispatch);
+    EXPECT_EQ(dispatch->mission_id, "vda-2");
+    ASSERT_EQ(dispatch->waypoints.size(), 2U);    // n4, n6 only
+    EXPECT_NEAR(dispatch->waypoints[0].x, 4.0, 1e-9);   // ENU 2 + 2 m shift
+
+    // Progress of the new mission maps onto the original nodes.
+    const auto update = tracker.onProgress(progress("vda-2", MissionPhase::kRunning, 1, 2));
+    ASSERT_TRUE(update.last_reached);
+    EXPECT_EQ(update.last_reached->node_id, "n4");
+}
+
+TEST(RouteTracker, RealignWhilePausedWaitsForResume)
+{
+    RouteTracker tracker("vda", OrientationMode::kNode);
+    tracker.start(line(2, 2), std::nullopt, Transform2D{});
+    tracker.pause();
+
+    EXPECT_FALSE(tracker.realign(Transform2D{5.0, 0.0, 0.0}, std::nullopt, 1.0, 0.05));
+    const auto dispatch = tracker.resume(std::nullopt);
+    ASSERT_TRUE(dispatch);
+    EXPECT_NEAR(dispatch->waypoints[0].x, 6.0, 1e-9);
+}
+
+TEST(RouteTracker, RealignIgnoresNavigationFrameRoutes)
+{
+    RouteTracker tracker("vda", OrientationMode::kNode);
+    tracker.start(line(2, 2), std::nullopt);
+    EXPECT_FALSE(tracker.realign(Transform2D{5.0, 0.0, 0.0}, std::nullopt, 1.0, 0.05));
+    EXPECT_FALSE(tracker.transform());
+}
+
+TEST(RouteTracker, NoRealignWhileHeldByTheIsaacbot)
+{
+    RouteTracker tracker("vda", OrientationMode::kNode);
+    tracker.start(line(2, 2), std::nullopt, Transform2D{});
+    tracker.onProgress(progress("vda-1", MissionPhase::kHeld, 0, 2));
+    ASSERT_TRUE(tracker.heldByIsaacbot());
+
+    EXPECT_FALSE(tracker.realign(Transform2D{5.0, 0.0, 0.0}, std::nullopt, 1.0, 0.05));
+
+    tracker.onProgress(progress("vda-1", MissionPhase::kRunning, 0, 2));
+    EXPECT_TRUE(tracker.realign(Transform2D{5.0, 0.0, 0.0}, std::nullopt, 1.0, 0.05));
+}

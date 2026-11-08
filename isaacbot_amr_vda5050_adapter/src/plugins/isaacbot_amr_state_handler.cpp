@@ -59,6 +59,10 @@ public:
         for (const auto & error : domain::errorsFor(snapshot.health)) {
             current_state_->add_error(infrastructure::toError(error));
         }
+
+        for (const auto & info : infrastructure::toInformation(snapshot)) {
+            current_state_->add_information(info);
+        }
     }
 
 private:

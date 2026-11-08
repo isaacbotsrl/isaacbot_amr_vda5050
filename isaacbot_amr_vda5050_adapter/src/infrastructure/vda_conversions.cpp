@@ -14,6 +14,9 @@
 
 #include "isaacbot_amr_vda5050_adapter/infrastructure/vda_conversions.hpp"
 
+#include <cstdio>
+#include <string>
+
 namespace isaacbot_amr_vda5050_adapter::infrastructure
 {
 
@@ -36,16 +39,76 @@ std::vector<domain::RouteNode> toRouteNodes(const std::vector<isaacbot_amr_vda50
 isaacbot_amr_vda5050_msgs::msg::AGVPosition toAgvPosition(const IsaacbotSnapshot & snapshot)
 {
     isaacbot_amr_vda5050_msgs::msg::AGVPosition position;
-    position.map_id = snapshot.map_id;
-    position.position_initialized = snapshot.pose.has_value();
+    const bool enu = snapshot.report_enu && snapshot.enu_pose.has_value();
+    const auto & pose = enu ? snapshot.enu_pose : snapshot.pose;
 
-    if (snapshot.pose) {
-        position.x = snapshot.pose->x;
-        position.y = snapshot.pose->y;
-        position.theta = snapshot.pose->theta;
+    position.map_id = enu ? snapshot.enu_map_id : snapshot.map_id;
+    position.position_initialized = pose.has_value();
+    position.localization_score = snapshot.localization_score;
+
+    if (pose) {
+        position.x = pose->x;
+        position.y = pose->y;
+        position.theta = pose->theta;
     }
 
     return position;
+}
+
+namespace
+{
+
+isaacbot_amr_vda5050_msgs::msg::InfoReference reference(const std::string & key, const std::string & value)
+{
+    isaacbot_amr_vda5050_msgs::msg::InfoReference ref;
+    ref.reference_key = key;
+    ref.reference_value = value;
+    return ref;
+}
+
+std::string number(double value, int decimals)
+{
+    char buffer[48];
+    std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
+    return buffer;
+}
+
+}  // namespace
+
+std::vector<isaacbot_amr_vda5050_msgs::msg::Info> toInformation(const IsaacbotSnapshot & snapshot)
+{
+    using isaacbot_amr_vda5050_msgs::msg::Info;
+
+    std::vector<Info> infos;
+
+    if (snapshot.gps_fix) {
+        Info info;
+        info.info_type = "gpsFix";
+        info.info_level = Info::INFO;
+        info.info_description = "Raw GNSS fix (display only; the isaacbot navigates by lidar).";
+        info.info_references = {
+            reference("lat", number(snapshot.gps_fix->point.lat, 8)),
+            reference("lon", number(snapshot.gps_fix->point.lon, 8)),
+            reference("fixType", snapshot.gps_fix->fix_type),
+            reference("sigma", number(snapshot.gps_fix->sigma_m, 2))};
+        infos.push_back(info);
+    }
+
+    if (snapshot.alignment) {
+        Info info;
+        info.info_type = "alignment";
+        info.info_level = Info::DEBUG;
+        info.info_description = "GPS (ENU) to SLAM map alignment.";
+        info.info_references = {
+            reference("aligned", snapshot.enu_pose ? "true" : "false"),
+            reference("rmsM", number(snapshot.alignment->rms_m, 2)),
+            reference("samples", std::to_string(snapshot.alignment->samples)),
+            reference("spreadM", number(snapshot.alignment->spread_m, 1)),
+            reference("yawFromFit", snapshot.alignment->yaw_from_fit ? "true" : "false")};
+        infos.push_back(info);
+    }
+
+    return infos;
 }
 
 isaacbot_amr_vda5050_msgs::msg::Velocity toVelocity(const IsaacbotSnapshot & snapshot)

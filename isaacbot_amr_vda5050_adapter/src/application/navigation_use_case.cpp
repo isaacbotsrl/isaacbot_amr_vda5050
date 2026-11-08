@@ -25,9 +25,12 @@ using domain::RouteOutcome;
 
 NavigationUseCase::NavigationUseCase(
     std::shared_ptr<MissionPort> missions, std::shared_ptr<PosePort> pose,
-    std::string mission_prefix, domain::OrientationMode orientation_mode)
+    std::string mission_prefix, domain::OrientationMode orientation_mode,
+    std::shared_ptr<FrameTransformPort> frames, RealignConfig realign)
 : missions_(std::move(missions)),
   pose_(std::move(pose)),
+  frames_(std::move(frames)),
+  realign_(realign),
   tracker_(std::move(mission_prefix), orientation_mode)
 {
     if (missions_ == nullptr || pose_ == nullptr) {
@@ -35,10 +38,23 @@ NavigationUseCase::NavigationUseCase(
     }
 }
 
-CommandResult NavigationUseCase::start(std::vector<domain::RouteNode> nodes)
+CommandResult NavigationUseCase::start(
+    std::vector<domain::RouteNode> nodes, domain::RouteFrame frame)
 {
     std::lock_guard<std::mutex> command_lock(command_mutex_);
     const auto pose = pose_->currentPose();
+
+    std::optional<domain::Transform2D> to_navigation;
+    if (frame == domain::RouteFrame::kEnu) {
+        if (frames_ != nullptr) {
+            to_navigation = frames_->enuToNavigation();
+        }
+        if (!to_navigation) {
+            return {false,
+                "The order is in the shared ENU frame, but the isaacbot has no GPS alignment to "
+                "its map yet (no GPS fix, or no heading).", false};
+        }
+    }
 
     std::optional<Dispatch> dispatch;
     bool ours_was_running = false;
@@ -48,7 +64,7 @@ CommandResult NavigationUseCase::start(std::vector<domain::RouteNode> nodes)
         ours_was_running = tracker_.dispatched();
 
         try {
-            dispatch = tracker_.start(std::move(nodes), pose);
+            dispatch = tracker_.start(std::move(nodes), pose, to_navigation);
         } catch (const std::exception & e) {
             return {false, e.what(), false};
         }
@@ -76,6 +92,54 @@ CommandResult NavigationUseCase::extend(std::vector<domain::RouteNode> nodes)
     }
 
     return send(dispatch, ours_was_running);
+}
+
+CommandResult NavigationUseCase::realign()
+{
+    if (frames_ == nullptr) {
+        return {true, "No ENU frame.", false};
+    }
+
+    const auto to_navigation = frames_->enuToNavigation();
+
+    if (!to_navigation) {
+        // Only a new SLAM session drops the alignment: the route's goals belong to a dead frame.
+        if (!routeInEnu()) {
+            return {true, "No GPS alignment.", false};
+        }
+        const auto cancelled = cancel();
+        return {false,
+            "The GPS alignment was lost (a new map started): the route was stopped. " +
+            cancelled.message, false};
+    }
+
+    std::lock_guard<std::mutex> command_lock(command_mutex_);
+
+    const auto pose = pose_->currentPose();
+    std::optional<Dispatch> dispatch;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        dispatch = tracker_.realign(
+            *to_navigation, pose, realign_.min_shift_m, realign_.min_yaw_rad);
+    }
+
+    if (!dispatch) {
+        return {true, "Alignment unchanged.", false};
+    }
+
+    auto result = send(dispatch, true);
+    if (result.ok) {
+        result.message = "Re-projected the remaining nodes onto the map: " + result.message;
+    }
+
+    return result;
+}
+
+bool NavigationUseCase::routeInEnu() const
+{
+    std::lock_guard<std::mutex> lock(state_mutex_);
+
+    return tracker_.active() && tracker_.transform().has_value();
 }
 
 CommandResult NavigationUseCase::cancel()

@@ -73,6 +73,19 @@ def _launch_setup(context):
         parameters=[params_file, {**identity, 'robot_name': serial_number}],
     )
 
+    # Delivery (isaacbot_amr_delivery_portal): the shared ENU frame and the cargo box. Each goes in
+    # only when set, so connector.yaml's defaults hold otherwise.
+    delivery = {}
+    for name, parameter, kind in (
+            ('datum_lat', 'isaacbot.geo.datum_lat', float),
+            ('datum_lon', 'isaacbot.geo.datum_lon', float),
+            ('enu_map_id', 'isaacbot.geo.enu_map_id', str),
+            ('parked_heading_deg', 'isaacbot.geo.parked_heading_deg', float),
+            ('cargo_lock_output', 'isaacbot.cargo.lock_output', int)):
+        value = arg(name).strip()
+        if value:
+            delivery[parameter] = kind(value)
+
     adapter = Node(
         package='isaacbot_amr_vda5050_adapter',
         executable='adapter_node',
@@ -86,6 +99,7 @@ def _launch_setup(context):
                 'robot_name': serial_number,
                 'isaacbot.namespace': isaacbot_amr_namespace,
                 'isaacbot.map_frame': arg('map_frame'),
+                **delivery,
             },
         ],
     )
@@ -121,6 +135,22 @@ def generate_launch_description():
             'map_frame', default_value='map',
             description='Nav 2 global frame the order coordinates are in; prefixed with '
                         '<namespace>/.'),
+        DeclareLaunchArgument(
+            'datum_lat', default_value='',
+            description='Delivery: latitude of the shared ENU frame origin (the pizzeria). '
+                        'Empty with datum_lon: no ENU frame (map-frame orders only).'),
+        DeclareLaunchArgument(
+            'datum_lon', default_value='', description='Delivery: longitude of the ENU origin.'),
+        DeclareLaunchArgument(
+            'enu_map_id', default_value='',
+            description="Delivery: the ENU frame's VDA 5050 mapId (as the portal's ENU_MAP_ID)."),
+        DeclareLaunchArgument(
+            'parked_heading_deg', default_value='',
+            description='Delivery: compass bearing (0 = North, clockwise) the isaacbot faces '
+                        'parked at the shop; seeds the GPS alignment of each trip.'),
+        DeclareLaunchArgument(
+            'cargo_lock_output', default_value='',
+            description='Delivery: aux output 1..6 driving the cargo box lock; 0 = none.'),
         DeclareLaunchArgument(
             'use_sim_time', default_value='false', description='Use /clock (Gazebo).'),
         DeclareLaunchArgument(

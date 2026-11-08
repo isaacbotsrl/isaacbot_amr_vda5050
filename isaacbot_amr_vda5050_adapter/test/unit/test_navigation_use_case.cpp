@@ -187,3 +187,81 @@ TEST_F(Fixture, HeldByTheIsaacbotCountsAsPaused)
     navigation.onMissionProgress({"vda-1", MissionPhase::kRunning, 0, 1, ""});
     EXPECT_FALSE(navigation.paused());
 }
+
+// --- delivery orders in the shared ENU frame -----------------------------------------------------
+
+using isaacbot_amr_vda5050_adapter::application::FrameTransformPort;
+using isaacbot_amr_vda5050_adapter::domain::RouteFrame;
+using isaacbot_amr_vda5050_adapter::domain::Transform2D;
+
+namespace
+{
+
+class FakeFrames : public FrameTransformPort
+{
+public:
+    std::optional<Transform2D> enuToNavigation() const override { return transform; }
+    std::optional<Transform2D> transform;
+};
+
+struct EnuFixture : ::testing::Test
+{
+    std::shared_ptr<FakeMissions> missions{std::make_shared<FakeMissions>()};
+    std::shared_ptr<FakeFrames> frames{std::make_shared<FakeFrames>()};
+    NavigationUseCase navigation{
+        missions, std::make_shared<FakePose>(), "vda", OrientationMode::kNode, frames};
+};
+
+}  // namespace
+
+TEST_F(EnuFixture, RefusesAnEnuRouteBeforeTheGpsAlignment)
+{
+    const auto result = navigation.start(nodes(2), RouteFrame::kEnu);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.message.find("no GPS alignment"), std::string::npos);
+    EXPECT_TRUE(missions->dispatched_ids.empty());
+}
+
+TEST_F(EnuFixture, DrivesAnEnuRouteInTheMapAndRealignsWhenTheMapDrifts)
+{
+    frames->transform = Transform2D{100.0, 0.0, 0.0};
+    ASSERT_TRUE(navigation.start(nodes(3), RouteFrame::kEnu).ok);
+    EXPECT_TRUE(navigation.routeInEnu());
+    EXPECT_NEAR(missions->last_waypoints[0].x, 101.0, 1e-9);
+
+    // Small drift: no new mission.
+    frames->transform = Transform2D{100.4, 0.0, 0.0};
+    EXPECT_TRUE(navigation.realign().ok);
+    EXPECT_EQ(missions->dispatched_ids.size(), 1U);
+
+    // 3 m: the remaining nodes are re-sent.
+    frames->transform = Transform2D{103.0, 0.0, 0.0};
+    const auto result = navigation.realign();
+    EXPECT_TRUE(result.ok) << result.message;
+    ASSERT_EQ(missions->dispatched_ids.size(), 2U);
+    EXPECT_NEAR(missions->last_waypoints[0].x, 104.0, 1e-9);
+}
+
+TEST_F(EnuFixture, NavigationFrameRoutesAreNeverRealigned)
+{
+    frames->transform = Transform2D{100.0, 0.0, 0.0};
+    ASSERT_TRUE(navigation.start(nodes(2)).ok);
+    EXPECT_FALSE(navigation.routeInEnu());
+    EXPECT_NEAR(missions->last_waypoints[0].x, 1.0, 1e-9);
+    frames->transform = Transform2D{200.0, 0.0, 0.0};
+    navigation.realign();
+    EXPECT_EQ(missions->dispatched_ids.size(), 1U);
+}
+
+TEST_F(EnuFixture, ALostAlignmentStopsTheRoute)
+{
+    frames->transform = Transform2D{};
+    ASSERT_TRUE(navigation.start(nodes(2), RouteFrame::kEnu).ok);
+
+    frames->transform.reset();   // a new SLAM session started under the route
+    const auto result = navigation.realign();
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_FALSE(navigation.routeActive());
+    EXPECT_EQ(missions->cancels, 1);
+}

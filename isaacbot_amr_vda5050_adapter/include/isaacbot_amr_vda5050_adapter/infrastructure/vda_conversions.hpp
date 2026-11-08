@@ -20,6 +20,7 @@
 #include "isaacbot_amr_vda5050_msgs/msg/agv_position.hpp"
 #include "isaacbot_amr_vda5050_msgs/msg/battery_state.hpp"
 #include "isaacbot_amr_vda5050_msgs/msg/error.hpp"
+#include "isaacbot_amr_vda5050_msgs/msg/info.hpp"
 #include "isaacbot_amr_vda5050_msgs/msg/node.hpp"
 #include "isaacbot_amr_vda5050_msgs/msg/safety_state.hpp"
 #include "isaacbot_amr_vda5050_msgs/msg/velocity.hpp"
@@ -34,7 +35,10 @@ namespace isaacbot_amr_vda5050_adapter::infrastructure
 /// Order nodes as route nodes. VDA 5050 positions are taken to be in the navigation frame.
 std::vector<domain::RouteNode> toRouteNodes(const std::vector<isaacbot_amr_vda5050_msgs::msg::Node> & nodes);
 
+/// In the shared ENU frame once the GPS alignment is known (and report_enu), else the map frame.
 isaacbot_amr_vda5050_msgs::msg::AGVPosition toAgvPosition(const IsaacbotSnapshot & snapshot);
+/// `gpsFix` (lat, lon, fixType, sigma) and `alignment` (rmsM, samples, spreadM, yawFromFit).
+std::vector<isaacbot_amr_vda5050_msgs::msg::Info> toInformation(const IsaacbotSnapshot & snapshot);
 isaacbot_amr_vda5050_msgs::msg::Velocity toVelocity(const IsaacbotSnapshot & snapshot);
 isaacbot_amr_vda5050_msgs::msg::BatteryState toBatteryState(const domain::VdaBattery & battery);
 isaacbot_amr_vda5050_msgs::msg::SafetyState toSafetyState(const domain::VdaSafety & safety);

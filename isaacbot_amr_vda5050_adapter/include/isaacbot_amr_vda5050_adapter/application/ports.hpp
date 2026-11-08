@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "isaacbot_amr_vda5050_adapter/domain/frame_aligner.hpp"
 #include "isaacbot_amr_vda5050_adapter/domain/isaacbot_amr_status.hpp"
 #include "isaacbot_amr_vda5050_adapter/domain/types.hpp"
 
@@ -62,6 +63,16 @@ public:
 
     /** @brief Current pose, or nothing when localization is unavailable. Non-blocking. */
     virtual std::optional<domain::Pose2D> currentPose() const = 0;
+};
+
+/** @brief Outbound port giving the shared ENU frame's transform into the navigation frame. */
+class FrameTransformPort
+{
+public:
+    virtual ~FrameTransformPort() = default;
+
+    /** @brief ENU -> navigation frame, or nothing while the GPS alignment is unknown. Non-blocking. */
+    virtual std::optional<domain::Transform2D> enuToNavigation() const = 0;
 };
 
 /**

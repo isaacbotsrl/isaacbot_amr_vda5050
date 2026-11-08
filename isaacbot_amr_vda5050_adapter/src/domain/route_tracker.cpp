@@ -48,13 +48,15 @@ RouteTracker::RouteTracker(std::string mission_prefix, OrientationMode orientati
 }
 
 std::optional<Dispatch> RouteTracker::start(
-    std::vector<RouteNode> nodes, const std::optional<Pose2D> & current_pose)
+    std::vector<RouteNode> nodes, const std::optional<Pose2D> & current_pose,
+    const std::optional<Transform2D> & to_navigation)
 {
     if (nodes.empty()) {
         throw std::invalid_argument("A route needs at least one node.");
     }
 
     nodes_ = std::move(nodes);
+    to_navigation_ = to_navigation;
     reached_ = 0;
     mission_offset_ = 0;
     mission_id_.clear();
@@ -76,6 +78,36 @@ std::optional<Dispatch> RouteTracker::extend(
     }
 
     nodes_.insert(nodes_.end(), nodes.begin(), nodes.end());
+
+    return dispatchRemaining(current_pose);
+}
+
+std::optional<Dispatch> RouteTracker::realign(
+    const Transform2D & to_navigation, const std::optional<Pose2D> & current_pose,
+    double min_shift_m, double min_yaw_rad)
+{
+    // Held by the isaacbot (motion lock, dead lidar): never restart driving from here; the
+    // transform is applied on the next check once the hold ends.
+    if (!active_ || !to_navigation_ || reached_ >= nodes_.size() || held_) {
+        return std::nullopt;
+    }
+
+    double shift = 0.0;
+    for (std::size_t i = reached_; i < nodes_.size(); ++i) {
+        shift = std::max(shift, displacement(*to_navigation_, to_navigation, nodes_[i].pose));
+    }
+    const double yaw_change = std::abs(wrapAngle(to_navigation.yaw - to_navigation_->yaw));
+
+    if (shift < min_shift_m && yaw_change < min_yaw_rad) {
+        return std::nullopt;
+    }
+
+    to_navigation_ = to_navigation;
+
+    // Paused: resume() dispatches with the new transform.
+    if (paused_) {
+        return std::nullopt;
+    }
 
     return dispatchRemaining(current_pose);
 }
@@ -106,6 +138,7 @@ std::optional<Dispatch> RouteTracker::resume(const std::optional<Pose2D> & curre
 void RouteTracker::clear()
 {
     nodes_.clear();
+    to_navigation_.reset();
     reached_ = 0;
     mission_offset_ = 0;
     mission_id_.clear();
@@ -187,8 +220,12 @@ std::vector<Pose2D> RouteTracker::waypointsFrom(
     std::vector<Pose2D> waypoints;
     waypoints.reserve(nodes_.size() - first);
 
+    const auto navigationPose = [this](std::size_t i) {
+        return to_navigation_ ? to_navigation_->toMap(nodes_[i].pose) : nodes_[i].pose;
+    };
+
     for (std::size_t i = first; i < nodes_.size(); ++i) {
-        Pose2D waypoint = nodes_[i].pose;
+        Pose2D waypoint = navigationPose(i);
 
         if (orientation_mode_ == OrientationMode::kPath) {
             // Arrive facing along the edge the isaacbot drives in on: from the previous node, or
@@ -196,9 +233,9 @@ std::vector<Pose2D> RouteTracker::waypointsFrom(
             std::optional<double> heading;
 
             if (i > 0) {
-                heading = headingBetween(nodes_[i - 1].pose, nodes_[i].pose);
+                heading = headingBetween(navigationPose(i - 1), waypoint);
             } else if (current_pose) {
-                heading = headingBetween(*current_pose, nodes_[i].pose);
+                heading = headingBetween(*current_pose, waypoint);
             }
 
             // A zero-length edge (repeated node) keeps the heading the isaacbot already has.

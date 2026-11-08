@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "isaacbot_amr_vda5050_adapter/domain/frame_aligner.hpp"
 #include "isaacbot_amr_vda5050_adapter/domain/types.hpp"
 
 namespace isaacbot_amr_vda5050_adapter::domain
@@ -59,6 +60,11 @@ struct RouteUpdate
  *
  * Pause is a property of the vehicle, not of the route: a route started or extended while paused
  * is recorded but not dispatched until resume().
+ *
+ * A route may be given in another frame than the navigation one (a delivery order in the shared
+ * ENU frame) with the transform into the navigation frame. The nodes are kept as given and
+ * transformed at each dispatch, so realign() can re-project the nodes still ahead when the
+ * transform changes (the live SLAM map drifted against GPS).
  */
 class RouteTracker
 {
@@ -72,7 +78,22 @@ public:
      * @throws std::invalid_argument when @p nodes is empty.
      */
     std::optional<Dispatch> start(
-        std::vector<RouteNode> nodes, const std::optional<Pose2D> & current_pose);
+        std::vector<RouteNode> nodes, const std::optional<Pose2D> & current_pose,
+        const std::optional<Transform2D> & to_navigation = std::nullopt);
+
+    /**
+     * @brief Re-project the nodes not yet reached with a new transform (routes started with one).
+     *
+     * Nothing changes until a remaining node would move at least @p min_shift_m, or the yaw
+     * changes by @p min_yaw_rad: small corrections accumulate instead of restarting the mission.
+     * @return The re-projected mission when one has to be dispatched.
+     */
+    std::optional<Dispatch> realign(
+        const Transform2D & to_navigation, const std::optional<Pose2D> & current_pose,
+        double min_shift_m, double min_yaw_rad);
+
+    /// The transform of the route's nodes into the navigation frame; none: already in it.
+    const std::optional<Transform2D> & transform() const { return to_navigation_; }
 
     /**
      * @brief Append nodes to the active route (VDA 5050 order stitching).
@@ -115,6 +136,7 @@ private:
     OrientationMode orientation_mode_;
 
     std::vector<RouteNode> nodes_;
+    std::optional<Transform2D> to_navigation_;
     std::size_t reached_{0};          ///< Nodes of nodes_ the isaacbot has passed.
     std::size_t mission_offset_{0};   ///< Index in nodes_ of the dispatched mission's waypoint 0.
     std::string mission_id_;          ///< Dispatched mission; empty when none.

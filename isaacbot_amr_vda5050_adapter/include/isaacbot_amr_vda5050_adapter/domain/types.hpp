@@ -37,6 +37,16 @@ struct RouteNode
     Pose2D pose;
 };
 
+/** @brief The frame an order's node positions are given in. */
+enum class RouteFrame
+{
+    /// The navigation frame (Nav 2's global frame, the live SLAM map): used as given.
+    kNavigation,
+    /// The fleet's shared East-North-Up frame (delivery orders): aligned to the navigation frame
+    /// with GPS before driving.
+    kEnu,
+};
+
 /** @brief How the heading of each waypoint is chosen. */
 enum class OrientationMode
 {

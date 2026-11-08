@@ -41,15 +41,38 @@ namespace isaacbot_amr_vda5050_adapter::application
  * split, a mission_state message delivered while a set_mission call waits would block the only
  * thread that can deliver the call's response.
  */
+/** @brief When a route in the ENU frame is re-projected onto the drifting SLAM map. */
+struct RealignConfig
+{
+    double min_shift_m{1.0};       ///< A node still ahead would move at least this much...
+    double min_yaw_rad{0.0524};    ///< ...or the yaw changed this much (3 degrees).
+};
+
 class NavigationUseCase
 {
 public:
+    /**
+     * @param frames ENU -> navigation transform for routes in the ENU frame; nullptr: such routes
+     *        are refused.
+     */
     NavigationUseCase(
         std::shared_ptr<MissionPort> missions, std::shared_ptr<PosePort> pose,
-        std::string mission_prefix, domain::OrientationMode orientation_mode);
+        std::string mission_prefix, domain::OrientationMode orientation_mode,
+        std::shared_ptr<FrameTransformPort> frames = nullptr, RealignConfig realign = {});
 
     /** @brief Replace the route and send it to the isaacbot (held back while paused). */
-    CommandResult start(std::vector<domain::RouteNode> nodes);
+    CommandResult start(
+        std::vector<domain::RouteNode> nodes,
+        domain::RouteFrame frame = domain::RouteFrame::kNavigation);
+
+    /**
+     * @brief Re-project an ENU route's remaining nodes when the GPS alignment moved enough.
+     *        Blocks like the other commands when it re-dispatches.
+     */
+    CommandResult realign();
+
+    /// The active route is in the ENU frame.
+    bool routeInEnu() const;
 
     /** @brief Append nodes to the active route (order stitching). */
     CommandResult extend(std::vector<domain::RouteNode> nodes);
@@ -81,6 +104,8 @@ private:
 
     std::shared_ptr<MissionPort> missions_;
     std::shared_ptr<PosePort> pose_;
+    std::shared_ptr<FrameTransformPort> frames_;
+    RealignConfig realign_;
 
     std::mutex command_mutex_;       ///< Serializes commands, held across MissionPort calls.
     mutable std::mutex state_mutex_; ///< Guards everything below; never held across a port call.

@@ -14,9 +14,13 @@
 
 #include "isaacbot_amr_vda5050_adapter/infrastructure/isaacbot_amr_link.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <future>
+#include <limits>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 
@@ -169,6 +173,47 @@ double yawOf(const geometry_msgs::msg::Quaternion & q)
     return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
 }
 
+constexpr double kDegToRad = M_PI / 180.0;
+// After a new SLAM session starts, GPS fixes wait this long before pairing with TF poses.
+constexpr double kSessionSettle = 2.0;
+
+std::optional<domain::GpsFix> gpsFixFor(const sensor_msgs::msg::NavSatFix & msg)
+{
+    using sensor_msgs::msg::NavSatFix;
+    using sensor_msgs::msg::NavSatStatus;
+
+    if (msg.status.status < NavSatStatus::STATUS_FIX) {
+        return std::nullopt;
+    }
+
+    domain::GpsFix fix;
+    fix.point = domain::GeoPoint{msg.latitude, msg.longitude};
+    if (!fix.point.valid()) {
+        return std::nullopt;
+    }
+
+    if (msg.position_covariance_type != NavSatFix::COVARIANCE_TYPE_UNKNOWN) {
+        const double variance = std::max(msg.position_covariance[0], msg.position_covariance[4]);
+        if (std::isfinite(variance) && variance > 0.0) {
+            fix.sigma_m = std::sqrt(variance);
+        }
+    }
+
+    switch (msg.status.status) {
+        case NavSatStatus::STATUS_GBAS_FIX:
+            fix.fix_type = "GBAS";
+            break;
+        case NavSatStatus::STATUS_SBAS_FIX:
+            fix.fix_type = "SBAS";
+            break;
+        default:
+            fix.fix_type = "GPS";
+            break;
+    }
+
+    return fix;
+}
+
 }  // namespace
 
 IsaacbotLinkConfig IsaacbotLinkConfig::fromParameters(rclcpp::Node & node)
@@ -216,6 +261,52 @@ IsaacbotLinkConfig IsaacbotLinkConfig::fromParameters(rclcpp::Node & node)
     config.status_timeout = node.declare_parameter<double>("isaacbot.status_timeout", 2.0);
     // The PLC acknowledges each write over Modbus; the drive UI allows the same 3 s.
     config.aux_output_timeout = node.declare_parameter<double>("isaacbot.aux_output_timeout", 3.0);
+
+    // Delivery (isaacbot_amr_delivery_portal). NaN datum: off.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double datum_lat = node.declare_parameter<double>("isaacbot.geo.datum_lat", nan);
+    const double datum_lon = node.declare_parameter<double>("isaacbot.geo.datum_lon", nan);
+    if (domain::GeoPoint{datum_lat, datum_lon}.valid()) {
+        config.datum = domain::GeoPoint{datum_lat, datum_lon};
+    }
+    config.enu_map_id = node.declare_parameter<std::string>("isaacbot.geo.enu_map_id", "enu_site");
+    config.report_enu = node.declare_parameter<bool>("isaacbot.geo.report_enu", true);
+    config.gps_fix_topic = name("isaacbot.geo.gps_fix_topic", "gps/fix");
+    config.gps_course_topic = name("isaacbot.geo.gps_course_topic", "gps/heading_imu");
+    config.start_mapping_service = name("isaacbot.geo.start_mapping_service", "start_mapping");
+    config.start_trip_timeout = node.declare_parameter<double>("isaacbot.geo.start_trip_timeout", 60.0);
+    // Compass bearing (0 = North, clockwise) the isaacbot faces when parked at the shop.
+    const double parked_bearing_deg =
+        node.declare_parameter<double>("isaacbot.geo.parked_heading_deg", nan);
+    if (std::isfinite(parked_bearing_deg)) {
+        config.geo.parked_heading_enu = (90.0 - parked_bearing_deg) * kDegToRad;
+    }
+    config.geo.parked_radius_m = node.declare_parameter<double>("isaacbot.geo.parked_radius_m", 30.0);
+    config.geo.default_sigma_m = node.declare_parameter<double>("isaacbot.geo.default_sigma_m", 3.0);
+    config.geo.aligner.min_step_m = node.declare_parameter<double>("isaacbot.geo.min_step_m", 2.0);
+    config.geo.aligner.max_samples = static_cast<std::size_t>(
+        node.declare_parameter<int>("isaacbot.geo.max_samples", 400));
+    config.geo.aligner.min_spread_m =
+        node.declare_parameter<double>("isaacbot.geo.min_spread_m", 15.0);
+    config.geo.aligner.max_sigma_m = node.declare_parameter<double>("isaacbot.geo.max_sigma_m", 8.0);
+    config.geo.aligner.outlier_gate_m =
+        node.declare_parameter<double>("isaacbot.geo.outlier_gate_m", 4.0);
+    config.realign.min_shift_m =
+        node.declare_parameter<double>("isaacbot.geo.realign_min_shift_m", 1.0);
+    config.realign.min_yaw_rad =
+        node.declare_parameter<double>("isaacbot.geo.realign_min_yaw_deg", 3.0) * kDegToRad;
+
+    // Cargo box: lock on aux output 1..6 (0 = none fitted).
+    const auto lock_output = node.declare_parameter<int>("isaacbot.cargo.lock_output", 0);
+    if (lock_output < 0 || lock_output > static_cast<int>(domain::kAuxOutputCount)) {
+        throw std::invalid_argument("isaacbot.cargo.lock_output must be 0 (none) or 1..6");
+    }
+    if (lock_output > 0) {
+        config.cargo.lock_output = lock_output - 1;
+    }
+    config.cargo.unlock_level = node.declare_parameter<bool>("isaacbot.cargo.unlock_level", true);
+    config.pickup_topic = name("isaacbot.cargo.pickup_topic", "cargo/pickup_confirmed");
+    config.pickup_timeout = node.declare_parameter<double>("isaacbot.cargo.pickup_timeout", 600.0);
 
     return config;
 }
@@ -279,7 +370,9 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
   config_(IsaacbotLinkConfig::fromParameters(node)),
   safety_received_(0, 0, node.get_clock()->get_clock_type()),
   motion_lock_received_(0, 0, node.get_clock()->get_clock_type()),
-  odom_received_(0, 0, node.get_clock()->get_clock_type())
+  odom_received_(0, 0, node.get_clock()->get_clock_type()),
+  fixes_from_(0, 0, node.get_clock()->get_clock_type()),
+  fix_received_(0, 0, node.get_clock()->get_clock_type())
 {
     using std::placeholders::_1;
 
@@ -291,14 +384,21 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
         std::chrono::duration<double>(config_.service_availability_timeout),
         std::chrono::duration<double>(config_.service_response_timeout));
 
-    navigation_ = std::make_unique<application::NavigationUseCase>(
-        missions, pose_source_, config_.mission_prefix, config_.orientation_mode);
+    if (config_.datum) {
+        geo_ = std::make_shared<application::GeoAlignmentUseCase>(
+            domain::EnuDatum(*config_.datum, config_.enu_map_id), config_.geo);
+    }
 
-    aux_outputs_ = std::make_unique<application::AuxOutputUseCase>(
-        std::make_shared<AuxOutputClient>(
-            node_, config_.aux_output_service_prefix, domain::kAuxOutputCount,
-            std::chrono::duration<double>(config_.service_availability_timeout),
-            std::chrono::duration<double>(config_.aux_output_timeout)));
+    navigation_ = std::make_unique<application::NavigationUseCase>(
+        missions, pose_source_, config_.mission_prefix, config_.orientation_mode, geo_,
+        config_.realign);
+
+    auto aux_client = std::make_shared<AuxOutputClient>(
+        node_, config_.aux_output_service_prefix, domain::kAuxOutputCount,
+        std::chrono::duration<double>(config_.service_availability_timeout),
+        std::chrono::duration<double>(config_.aux_output_timeout));
+    aux_outputs_ = std::make_unique<application::AuxOutputUseCase>(aux_client);
+    cargo_ = std::make_unique<application::CargoUseCase>(aux_client, config_.cargo);
 
     drive_mode_use_case_ = std::make_unique<application::DriveModeUseCase>(
         std::make_shared<DriveModeClient>(
@@ -328,8 +428,34 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
     localization_sub_ = node_.create_subscription<isaacbot_amr_msgs::msg::LocalizationState>(
         config_.localization_state_topic, latched,
         [this](const isaacbot_amr_msgs::msg::LocalizationState & msg) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            localization_ = msg;
+            using isaacbot_amr_msgs::msg::LocalizationState;
+            bool new_session = false;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                localization_ = msg;
+                // Another map is another frame, and so is a new SLAM session: the manager goes
+                // through SWITCHING (or UNAVAILABLE) into MAPPING for each, but resumes a paused
+                // one from ODOMETRY, which keeps its frame.
+                const bool fresh_mapping = msg.mode == LocalizationState::MAPPING &&
+                    (last_localization_mode_ == LocalizationState::SWITCHING ||
+                     last_localization_mode_ == LocalizationState::UNAVAILABLE);
+                new_session = fresh_mapping || msg.map_name != session_map_name_;
+                session_map_name_ = msg.map_name;
+                last_localization_mode_ = msg.mode;
+            }
+            if (new_session) {
+                // Reset first, then count the session: startTrip must never see the new session
+                // with the old session's alignment.
+                if (geo_) {
+                    geo_->reset();
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        fixes_from_ = node_.now() + rclcpp::Duration::from_seconds(kSessionSettle);
+                    }
+                    RCLCPP_INFO(node_.get_logger(), "New map frame: GPS alignment restarts.");
+                }
+                ++mapping_sessions_;
+            }
         });
 
     battery_sub_ = node_.create_subscription<sensor_msgs::msg::BatteryState>(
@@ -362,6 +488,36 @@ IsaacbotLink::IsaacbotLink(rclcpp::Node & node)
             odom_received_ = node_.now();
         });
 
+    if (geo_) {
+        // Reliable, as the GPS driver publishes (rules/ros2_communication.md: GNSS exception).
+        fix_sub_ = node_.create_subscription<sensor_msgs::msg::NavSatFix>(
+            config_.gps_fix_topic, rclcpp::QoS(rclcpp::KeepLast(10)).reliable(),
+            [this](const sensor_msgs::msg::NavSatFix & msg) { onFix(msg); });
+
+        course_sub_ = node_.create_subscription<sensor_msgs::msg::Imu>(
+            config_.gps_course_topic, rclcpp::QoS(rclcpp::KeepLast(10)),
+            [this](const sensor_msgs::msg::Imu & msg) {
+                if (const auto pose = pose_source_->currentPose()) {
+                    geo_->onCourse(yawOf(msg.orientation), *pose);
+                }
+            });
+
+        RCLCPP_INFO(
+            node_.get_logger(), "Delivery ENU frame '%s' at %.7f, %.7f (GPS for alignment only).",
+            config_.enu_map_id.c_str(), config_.datum->lat, config_.datum->lon);
+    }
+
+    start_mapping_client_ =
+        node_.create_client<std_srvs::srv::Trigger>(config_.start_mapping_service);
+
+    pickup_sub_ = node_.create_subscription<std_msgs::msg::Bool>(
+        config_.pickup_topic, rclcpp::QoS(rclcpp::KeepLast(10)).reliable(),
+        [this](const std_msgs::msg::Bool & msg) {
+            if (msg.data) {
+                cargo_->onPickupConfirmed();
+            }
+        });
+
     RCLCPP_INFO_STREAM(
         node_.get_logger(), "VDA 5050 isaacbot link: missions via '"
                                 << config_.set_mission_service << "', poses in '"
@@ -375,12 +531,29 @@ IsaacbotSnapshot IsaacbotLink::snapshot() const
     snapshot.paused = navigation_->paused();
     snapshot.health.mission_refusal = navigation_->lastRefusal();
 
-    // Taken only after the use case's own lock is released: the two never nest.
+    if (geo_) {
+        snapshot.enu_map_id = config_.enu_map_id;
+        snapshot.report_enu = config_.report_enu;
+        snapshot.gps_fix = geo_->latestFix();
+        snapshot.alignment = geo_->quality();
+        if (snapshot.pose) {
+            snapshot.enu_pose = geo_->toEnu(*snapshot.pose);
+        }
+    }
+    const double geo_score = geo_ ? geo_->score() : 0.0;
+
+    // Taken only after the use cases' own locks are released: they never nest.
     std::lock_guard<std::mutex> lock(mutex_);
 
     snapshot.map_id = config_.map_id;
     if (localization_ && !localization_->map_name.empty()) {
         snapshot.map_id = localization_->map_name;
+    }
+    snapshot.localization_score = snapshot.enu_pose ? geo_score : (snapshot.pose ? 1.0 : 0.0);
+
+    // A fix the receiver stopped sending is not shown as current.
+    if (snapshot.gps_fix && !fresh(fix_received_)) {
+        snapshot.gps_fix.reset();
     }
 
     if (odom_ && fresh(odom_received_)) {
@@ -442,6 +615,65 @@ void IsaacbotLink::onMissionState(const isaacbot_amr_msgs::msg::MissionState & m
     if (listener) {
         listener();
     }
+}
+
+void IsaacbotLink::onFix(const sensor_msgs::msg::NavSatFix & msg)
+{
+    const auto fix = gpsFixFor(msg);
+    if (!fix) {
+        return;
+    }
+
+    bool settled = true;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        fix_received_ = node_.now();
+        settled = fix_received_ >= fixes_from_;
+    }
+
+    // While a new SLAM session settles, the fix is shown but not paired with a pose.
+    geo_->onFix(*fix, settled ? pose_source_->currentPose() : std::nullopt);
+}
+
+application::CommandResult IsaacbotLink::startMapping()
+{
+    auto & client = *start_mapping_client_;
+    const std::string service = client.get_service_name();
+
+    if (!client.wait_for_service(
+            std::chrono::duration<double>(config_.service_availability_timeout)))
+    {
+        return {false, "'" + service + "' unavailable (isaacbot_amr_indoor_nav_manager).", false};
+    }
+
+    auto future = client.async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+    if (future.wait_for(std::chrono::duration<double>(config_.service_response_timeout)) !=
+        std::future_status::ready)
+    {
+        client.remove_pending_request(future);
+        return {false, "'" + service + "' did not answer in time.", true};
+    }
+
+    const auto response = future.get();
+    return {response->success, response->message, false};
+}
+
+bool IsaacbotLink::readyForEnuOrders() const
+{
+    if (!geo_ || !geo_->enuToNavigation() || !pose_source_->currentPose()) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    return localization_ && localization_->mode == isaacbot_amr_msgs::msg::LocalizationState::MAPPING;
+}
+
+domain::RouteFrame IsaacbotLink::frameOf(const std::string & map_id) const
+{
+    // Recognised even without a datum: such an order is then refused, never driven as raw
+    // SLAM-map metres.
+    return !map_id.empty() && map_id == config_.enu_map_id ?
+        domain::RouteFrame::kEnu : domain::RouteFrame::kNavigation;
 }
 
 bool IsaacbotLink::fresh(const rclcpp::Time & received) const

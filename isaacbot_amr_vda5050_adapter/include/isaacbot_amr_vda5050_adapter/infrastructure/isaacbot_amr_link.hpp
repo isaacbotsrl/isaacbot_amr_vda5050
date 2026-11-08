@@ -15,6 +15,8 @@
 #ifndef ISAACBOT_AMR_VDA5050_ADAPTER_INFRASTRUCTURE_ISAACBOT_AMR_LINK_HPP_
 #define ISAACBOT_AMR_VDA5050_ADAPTER_INFRASTRUCTURE_ISAACBOT_AMR_LINK_HPP_
 
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -28,13 +30,18 @@
 #include "isaacbot_amr_msgs/msg/mission_state.hpp"
 #include "isaacbot_amr_msgs/msg/safety_status.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
+#include "sensor_msgs/msg/imu.hpp"
+#include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_srvs/srv/trigger.hpp"
 #include "tf2_ros/buffer.hpp"
 #include "tf2_ros/transform_listener.hpp"
 
 #include "isaacbot_amr_vda5050_adapter/application/aux_output_use_case.hpp"
+#include "isaacbot_amr_vda5050_adapter/application/cargo_use_case.hpp"
 #include "isaacbot_amr_vda5050_adapter/application/drive_mode_use_case.hpp"
 #include "isaacbot_amr_vda5050_adapter/application/follow_me_use_case.hpp"
+#include "isaacbot_amr_vda5050_adapter/application/geo_alignment_use_case.hpp"
 #include "isaacbot_amr_vda5050_adapter/application/navigation_use_case.hpp"
 #include "isaacbot_amr_vda5050_adapter/application/ports.hpp"
 #include "isaacbot_amr_vda5050_adapter/domain/isaacbot_amr_status.hpp"
@@ -74,6 +81,23 @@ struct IsaacbotLinkConfig
     double status_timeout{2.0};
     double aux_output_timeout{3.0};
 
+    /// Delivery: the shared ENU frame. Off (no datum) for a robot that only takes map-frame orders.
+    std::optional<domain::GeoPoint> datum;
+    std::string enu_map_id;
+    application::GeoAlignmentConfig geo;
+    application::RealignConfig realign;
+    /// Report agvPosition in the ENU frame once aligned (the delivery portal draws it on its map).
+    bool report_enu{true};
+    std::string gps_fix_topic;
+    std::string gps_course_topic;
+    /// startTrip: isaacbot_amr_indoor_nav_manager's start_mapping (std_srvs/Trigger).
+    std::string start_mapping_service;
+    double start_trip_timeout{60.0};
+
+    application::CargoConfig cargo;
+    std::string pickup_topic;
+    double pickup_timeout{600.0};
+
     /** @brief Declare and read the parameters on @p node. */
     static IsaacbotLinkConfig fromParameters(rclcpp::Node & node);
 };
@@ -91,6 +115,13 @@ struct IsaacbotSnapshot
 {
     std::optional<domain::Pose2D> pose;
     std::string map_id;
+    /// The pose in the shared ENU frame, when the GPS alignment is known.
+    std::optional<domain::Pose2D> enu_pose;
+    std::string enu_map_id;
+    double localization_score{0.0};
+    std::optional<domain::GpsFix> gps_fix;
+    std::optional<domain::AlignmentQuality> alignment;
+    bool report_enu{false};
     Velocity2D velocity;
     domain::BatteryReading battery;
     domain::IsaacbotHealth health;
@@ -133,6 +164,18 @@ public:
     application::AuxOutputUseCase & auxOutputs() { return *aux_outputs_; }
     application::DriveModeUseCase & driveMode() { return *drive_mode_use_case_; }
     application::FollowMeUseCase & followMe() { return *follow_me_use_case_; }
+    application::CargoUseCase & cargo() { return *cargo_; }
+    /// The ENU frame and GPS alignment; nullptr when no datum is configured.
+    application::GeoAlignmentUseCase * geo() { return geo_.get(); }
+    /// The frame an order's node positions are in, from their mapId.
+    domain::RouteFrame frameOf(const std::string & map_id) const;
+
+    /** @brief Start a fresh SLAM session (startTrip). Blocks: never on the executor thread. */
+    application::CommandResult startMapping();
+    /// SLAM sessions seen so far: startTrip waits for a new one.
+    std::uint64_t mappingSessions() const { return mapping_sessions_.load(); }
+    /// Mapping, the pose is known and GPS aligned it: ENU orders can be driven.
+    bool readyForEnuOrders() const;
     const IsaacbotLinkConfig & config() const { return config_; }
 
     /** @brief Current state. Non-blocking; safe on the executor thread. */
@@ -144,6 +187,7 @@ public:
 
 private:
     void onMissionState(const isaacbot_amr_msgs::msg::MissionState & msg);
+    void onFix(const sensor_msgs::msg::NavSatFix & msg);
     bool fresh(const rclcpp::Time & received) const;
 
     rclcpp::Node & node_;
@@ -153,6 +197,8 @@ private:
     std::unique_ptr<application::AuxOutputUseCase> aux_outputs_;
     std::unique_ptr<application::DriveModeUseCase> drive_mode_use_case_;
     std::unique_ptr<application::FollowMeUseCase> follow_me_use_case_;
+    std::shared_ptr<application::GeoAlignmentUseCase> geo_;
+    std::unique_ptr<application::CargoUseCase> cargo_;
 
     mutable std::mutex mutex_;
     std::optional<isaacbot_amr_msgs::msg::DriveMode> drive_mode_;
@@ -165,6 +211,14 @@ private:
     std::optional<nav_msgs::msg::Odometry> odom_;
     rclcpp::Time odom_received_;
     std::function<void()> progress_listener_;
+    std::string session_map_name_;
+    std::uint8_t last_localization_mode_{0};
+    std::atomic<std::uint64_t> mapping_sessions_{0};
+    /// GPS fixes before this are dropped: right after a new SLAM session, TF may still resolve
+    /// the old map frame, and one such pair would seed the new alignment wrongly.
+    rclcpp::Time fixes_from_;
+    rclcpp::Time fix_received_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr start_mapping_client_;
 
     rclcpp::Subscription<isaacbot_amr_msgs::msg::MissionState>::SharedPtr mission_state_sub_;
     rclcpp::Subscription<isaacbot_amr_msgs::msg::DriveMode>::SharedPtr drive_mode_sub_;
@@ -173,6 +227,9 @@ private:
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr motion_lock_sub_;
     rclcpp::Subscription<isaacbot_amr_msgs::msg::LocalizationState>::SharedPtr localization_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr fix_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr course_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pickup_sub_;
 };
 
 }  // namespace isaacbot_amr_vda5050_adapter::infrastructure

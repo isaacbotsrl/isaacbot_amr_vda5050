@@ -28,4 +28,16 @@
   <class type="isaacbot_amr_vda5050_adapter::plugins::StopFollowing" base_class_type="adapter::VDAAction">
     <description>stopFollowing: stop follow-me (isaacbot_amr_follow_me follow_me/stop).</description>
   </class>
+  <class type="isaacbot_amr_vda5050_adapter::plugins::OpenCargo" base_class_type="adapter::VDAAction">
+    <description>openCargo: unlock the delivery cargo box (isaacbot.cargo.lock_output).</description>
+  </class>
+  <class type="isaacbot_amr_vda5050_adapter::plugins::CloseCargo" base_class_type="adapter::VDAAction">
+    <description>closeCargo: lock the delivery cargo box (isaacbot.cargo.lock_output).</description>
+  </class>
+  <class type="isaacbot_amr_vda5050_adapter::plugins::ConfirmPickup" base_class_type="adapter::VDAAction">
+    <description>confirmPickup: wait at the customer until cargo/pickup_confirmed (or the timeout).</description>
+  </class>
+  <class type="isaacbot_amr_vda5050_adapter::plugins::StartTrip" base_class_type="adapter::VDAAction">
+    <description>startTrip: a fresh SLAM session for a delivery trip; finishes once aligned to GPS.</description>
+  </class>
 </library>

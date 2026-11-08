@@ -74,7 +74,8 @@
     # cancelOrder, stateRequest and factsheetRequest are handled by the controller itself.
     vda_action_handlers:
       ["startPause", "stopPause", "enableAuxOutput", "disableAuxOutput", "setDriveMode",
-       "startFollowing", "stopFollowing"]
+       "startFollowing", "stopFollowing", "startTrip", "openCargo", "confirmPickup",
+       "closeCargo"]
     start_pause:
       handler: "isaacbot_amr_vda5050_adapter::plugins::StartPause"
       description: "Stop driving and keep the order; stopPause continues it."
@@ -161,6 +162,45 @@
         node: false
         edge: false
 
+    # Delivery (isaacbot_amr_delivery_portal): the cargo box on the destination node of an order.
+    # The lock hardware is not chosen yet: isaacbot.cargo.lock_output 0 makes open/close no-ops,
+    # and anything can confirm the pickup on cargo/pickup_confirmed (std_msgs/Bool true): a lid
+    # switch, a PIN keypad, or an operator.
+    # Each trip maps afresh (lidar SLAM, no pre-built maps): the portal sends startTrip, waits for
+    # FINISHED (mapping + GPS-aligned), then sends the order in the ENU frame.
+    start_trip:
+      handler: "isaacbot_amr_vda5050_adapter::plugins::StartTrip"
+      description: "Start a fresh SLAM map for a delivery trip; finishes once aligned to GPS."
+      result_description: "Ready, or why not."
+      scopes:
+        instant: true
+        node: false
+        edge: false
+    open_cargo:
+      handler: "isaacbot_amr_vda5050_adapter::plugins::OpenCargo"
+      description: "Unlock the delivery cargo box."
+      result_description: "Unlocked, or why not."
+      scopes:
+        instant: true
+        node: true
+        edge: false
+    confirm_pickup:
+      handler: "isaacbot_amr_vda5050_adapter::plugins::ConfirmPickup"
+      description: "Wait at the customer until the order is taken (cargo/pickup_confirmed)."
+      result_description: "Taken, or timed out / cancelled."
+      scopes:
+        instant: false
+        node: true
+        edge: false
+    close_cargo:
+      handler: "isaacbot_amr_vda5050_adapter::plugins::CloseCargo"
+      description: "Lock the delivery cargo box."
+      result_description: "Locked, or why not."
+      scopes:
+        instant: true
+        node: true
+        edge: false
+
     # isaacbot_amr_vda5050_adapter: how the orders reach the isaacbot. Relative names resolve against
     # isaacbot.namespace (not the connector's own <namespace>/vda5050); frames get the isaacbot's
     # <namespace>/ tf prefix unless they already name one.
@@ -200,3 +240,39 @@
       status_timeout: 2.0
       # Per output write; the service answers once the safety PLC has acknowledged it.
       aux_output_timeout: 3.0
+
+      # Delivery: the fleet's shared East-North-Up frame (origin = the pizzeria). Orders whose
+      # mapId is enu_map_id are driven in the live SLAM map through a GPS alignment, and the state
+      # reports agvPosition in this frame once aligned. GPS never feeds Nav 2: the isaacbot
+      # navigates by lidar. No datum (the default): off. vda5050.launch.py sets them from its
+      # datum_* / enu_map_id / parked_heading_deg arguments.
+      geo:
+        # datum_lat: 44.4268    # unset (NaN): no ENU frame
+        # datum_lon: 26.1025
+        enu_map_id: "enu_site"
+        report_enu: true
+        gps_fix_topic: "gps/fix"
+        # isaacbot_amr_gps_heading's measured heading (GNSS course): seeds a trip's alignment.
+        gps_course_topic: "gps/heading_imu"
+        # Bearing the isaacbot faces parked at the shop (0 = North, clockwise); unset = unknown.
+        # parked_heading_deg: 90.0
+        parked_radius_m: 30.0
+        default_sigma_m: 3.0
+        # Alignment fit: a sample every min_step_m, the last max_samples kept, the yaw fitted
+        # once they span min_spread_m; fixes worse than max_sigma_m ignored.
+        min_step_m: 2.0
+        max_samples: 400
+        min_spread_m: 15.0
+        max_sigma_m: 8.0
+        outlier_gate_m: 4.0
+        # Re-send the nodes still ahead when the alignment moved one this much.
+        realign_min_shift_m: 1.0
+        realign_min_yaw_deg: 3.0
+        # startTrip: the nav manager service it calls, and how long it waits for the alignment.
+        start_mapping_service: "start_mapping"
+        start_trip_timeout: 60.0
+      cargo:
+        lock_output: 0        # aux output 1..6 of the cargo lock; 0 = none fitted
+        unlock_level: true    # the output level that unlocks
+        pickup_topic: "cargo/pickup_confirmed"
+        pickup_timeout: 600.0

@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "pluginlib/class_list_macros.hpp"
@@ -65,7 +66,18 @@ public:
         auto & navigation = link_->navigation();
         const auto [edges, nodes] = getNavigationSnapshot();
 
-        const auto started = navigation.start(infrastructure::toRouteNodes(nodes));
+        // Delivery orders come in the shared ENU frame; anything else is in the navigation frame.
+        const auto frame = link_->frameOf(
+            nodes.empty() ? std::string() : nodes.front().node_position.map_id);
+        for (const auto & node : nodes) {
+            if (link_->frameOf(node.node_position.map_id) != frame) {
+                RCLCPP_WARN(node_->get_logger(), "VDA 5050 route refused: mixed mapIds.");
+                finish(false);
+                return;
+            }
+        }
+
+        const auto started = navigation.start(infrastructure::toRouteNodes(nodes), frame);
         if (!started.ok) {
             RCLCPP_WARN(node_->get_logger(), "VDA 5050 route refused: %s", started.message.c_str());
             finish(false);
@@ -104,6 +116,21 @@ public:
                         result.message.c_str());
                     finish(false);
                     return;
+                }
+            }
+
+            // The live SLAM map drifts against GPS: move the nodes still ahead when it did.
+            if (navigation.routeInEnu()) {
+                const auto realigned = navigation.realign();
+                if (!realigned.ok) {
+                    RCLCPP_WARN(
+                        node_->get_logger(), "VDA 5050 route lost on realignment: %s",
+                        realigned.message.c_str());
+                    finish(false);
+                    return;
+                }
+                if (realigned.message.rfind("Re-projected", 0) == 0) {
+                    RCLCPP_INFO(node_->get_logger(), "%s", realigned.message.c_str());
                 }
             }
 

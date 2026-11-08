@@ -158,13 +158,14 @@ without parameters:
   turns in place poorly, and the ROS message cannot tell an omitted `theta` from `0.0`: honouring
   it would spin the isaacbot to 0 rad at every node of a master control that leaves `theta` out. Set
   `node` to use each node's `theta`.
-- **Frame:** node coordinates are taken to be in Nav 2's global frame (`isaacbot.map_frame`, always
+- **Frame:** node coordinates are taken to be in Nav 2's global frame, unless their mapId is the
+  delivery ENU frame (see "Delivery" below) (`isaacbot.map_frame`, always
   `map`; the container's `ISAACBOT_AMR_VDA5050_MAP_FRAME` still overrides it). The mission manager refuses missions in
   any other frame, with a message that ends up in `missionRefused`.
 - **Refused orders** do not stop a mission the isaacbot is already running for someone else (e.g.
   an operator's GoTo). Only a mission this connector dispatched, or one whose `set_mission` timed
   out, is cancelled.
-- **Not supported:** node and edge actions other than the aux-output actions, `initPosition`,
+- **Not supported:** node and edge actions other than the aux-output and cargo actions, `initPosition`,
   edge `maxSpeed` and trajectories, loads, and the `allowedDeviation*` tolerances (the mission
   manager uses Nav 2's goal checker). An unsupported action is forwarded to the adapter, which
   rejects it, and it shows up as `FAILED` in `actionStates`.
@@ -172,6 +173,53 @@ without parameters:
   well-formed order and any start node are accepted. A stitch arriving just after a segment
   finished is acknowledged but not driven.
 - A stitch re-sends the node being driven to, so Nav 2 re-plans once.
+
+## Delivery: the shared ENU frame, GPS alignment and the cargo box
+
+These are the orders of the [delivery portal](https://github.com/isaacbotsrl/isaacbot_amr_delivery_portal).
+The isaacbot **navigates by lidar only**: each trip is a fresh live SLAM map, and GPS never feeds
+Nav 2. GPS only lines the portal's orders up with that map, and shows where the isaacbot is.
+
+**Turning it on.** Set `isaacbot.geo.datum_lat` / `datum_lon` (the pizzeria) and `enu_map_id`. Each
+must match the portal's `DATUM_LAT` / `DATUM_LON` / `ENU_MAP_ID`. In the container these come from
+`ISAACBOT_AMR_DELIVERY_*`.
+
+**ENU orders.** An order whose `mapId` is `enu_map_id` is in metres East / North of the datum.
+The adapter:
+- converts its nodes into the SLAM map through `GeoAlignmentUseCase`;
+- refuses the order while there is no alignment yet.
+
+**The alignment** (`domain/frame_aligner`) is a weighted 2D rigid least-squares fit of pairs:
+(GPS fix in ENU, SLAM pose). It takes a pair every 2 m and keeps the last 400. It drops a fix with
+σ above 8 m, and refits once without outliers.
+- **Yaw:** fitted once the samples span 15 m. Before that, the yaw comes from a seed:
+  - `parked_heading_deg`, the compass bearing the isaacbot faces when parked at the shop. It counts
+    when the first fix of a SLAM session lies within 30 m of the datum.
+  - Or the measured GNSS course, `gps/heading_imu` from isaacbot_amr_gps_heading, which needs
+    `ISAACBOT_AMR_SYSTEM_USE_GPS=true`.
+- **Reset:** the alignment restarts on every new SLAM session, when localization goes
+  SWITCHING → MAPPING or the map name changes.
+
+**Drift.** The live SLAM map drifts against GPS. While an ENU order runs, the nodes still ahead are
+re-sent once one of them would move ≥ 1 m or the yaw changes ≥ 3° (`realign_min_*`). The
+re-projection keeps node ids, so progress reporting is unchanged.
+
+**State.** Once aligned, `agvPosition` is reported in the ENU frame, with `localizationScore`
+from the fit quality. The `information` array adds:
+- `gpsFix` (lat, lon, fixType, sigma);
+- `alignment` (rmsM, samples, spreadM, yawFromFit).
+
+**Actions.**
+
+| Action | Scope | What it does |
+|---|---|---|
+| `startTrip` | instant | Calls the nav manager's `start_mapping` (a fresh SLAM map), then waits until the isaacbot is mapping, has a pose and is GPS-aligned. FINISHED: the portal sends the order. FAILED after `start_trip_timeout` (60 s). |
+| `openCargo` / `closeCargo` | node, instant | Switch `isaacbot.cargo.lock_output` (aux 1..6; 0 = no lock fitted: a no-op that succeeds). |
+| `confirmPickup` | node | HARD-blocking: wait at the customer for `cargo/pickup_confirmed` (`std_msgs/Bool` true), e.g. from a lid switch, a PIN keypad or an operator. FAILED after `pickup_timeout` (600 s) or on cancel. |
+
+Nav 2 runs with `ISAACBOT_AMR_ORCH_NAV_PROFILE=delivery` for this (isaacbot_amr_navigation). The
+global costmap is then a 60 m rolling window of lidar observations, instead of following the
+ever-growing SLAM map.
 
 ## Running
 

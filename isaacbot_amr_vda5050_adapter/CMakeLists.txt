@@ -29,9 +29,13 @@ endforeach()
 add_library(${PROJECT_NAME}_core STATIC
     src/domain/aux_outputs.cpp
     src/domain/drive_mode_request.cpp
+    src/domain/frame_aligner.cpp
+    src/domain/geo.cpp
     src/domain/route_tracker.cpp
     src/domain/isaacbot_amr_status.cpp
     src/application/aux_output_use_case.cpp
+    src/application/cargo_use_case.cpp
+    src/application/geo_alignment_use_case.cpp
     src/application/drive_mode_use_case.cpp
     src/application/follow_me_use_case.cpp
     src/application/navigation_use_case.cpp)
@@ -50,6 +54,8 @@ add_library(${PROJECT_NAME}_plugins SHARED
     src/infrastructure/isaacbot_amr_link.cpp
     src/infrastructure/vda_conversions.cpp
     src/plugins/aux_output_actions.cpp
+    src/plugins/cargo_actions.cpp
+    src/plugins/trip_actions.cpp
     src/plugins/drive_mode_action.cpp
     src/plugins/follow_me_actions.cpp
     src/plugins/mission_nav_through_nodes.cpp
@@ -87,6 +93,18 @@ if(BUILD_TESTING)
 
     ament_add_gtest(test_route_tracker test/unit/test_route_tracker.cpp)
     target_link_libraries(test_route_tracker ${PROJECT_NAME}_core)
+
+    ament_add_gtest(test_geo test/unit/test_geo.cpp)
+    target_link_libraries(test_geo ${PROJECT_NAME}_core)
+
+    ament_add_gtest(test_frame_aligner test/unit/test_frame_aligner.cpp)
+    target_link_libraries(test_frame_aligner ${PROJECT_NAME}_core)
+
+    ament_add_gtest(test_geo_alignment_use_case test/unit/test_geo_alignment_use_case.cpp)
+    target_link_libraries(test_geo_alignment_use_case ${PROJECT_NAME}_core)
+
+    ament_add_gtest(test_cargo_use_case test/unit/test_cargo_use_case.cpp)
+    target_link_libraries(test_cargo_use_case ${PROJECT_NAME}_core)
 
     ament_add_gtest(test_isaacbot_amr_status test/unit/test_isaacbot_amr_status.cpp)
     target_link_libraries(test_isaacbot_amr_status ${PROJECT_NAME}_core)
